@@ -103,6 +103,7 @@ export class Context {
     private supportedExtensions: string[];
     private ignorePatterns: string[];
     private synchronizers = new Map<string, FileSynchronizer>();
+    private projectIgnorePatterns = new Map<string, string[]>(); // Per-project isolation
 
     constructor(config: ContextConfig = {}) {
         // Initialize services
@@ -132,7 +133,7 @@ export class Context {
         // Remove duplicates
         this.supportedExtensions = [...new Set(allSupportedExtensions)];
 
-        // Load custom ignore patterns from environment variables  
+        // Load custom ignore patterns from environment variables
         const envCustomIgnorePatterns = this.getCustomIgnorePatternsFromEnv();
 
         // Start with default ignore patterns
@@ -187,6 +188,14 @@ export class Context {
      */
     getIgnorePatterns(): string[] {
         return [...this.ignorePatterns];
+    }
+
+    /**
+     * Get project-specific ignore patterns for a codebase
+     */
+    getProjectIgnorePatterns(codebasePath: string): string[] {
+        const normalizedPath = path.resolve(codebasePath);
+        return this.projectIgnorePatterns.get(normalizedPath) || [...this.ignorePatterns];
     }
 
     /**
@@ -323,8 +332,9 @@ export class Context {
             // Load project-specific ignore patterns before creating FileSynchronizer
             await this.loadIgnorePatterns(codebasePath);
 
-            // To be safe, let's initialize if it's not there.
-            const newSynchronizer = new FileSynchronizer(codebasePath, this.ignorePatterns);
+            // Use project-specific ignore patterns for this codebase
+            const projectIgnorePatterns = this.getProjectIgnorePatterns(codebasePath);
+            const newSynchronizer = new FileSynchronizer(codebasePath, projectIgnorePatterns);
             await newSynchronizer.initialize();
             this.synchronizers.set(collectionName, newSynchronizer);
         }
@@ -661,6 +671,7 @@ export class Context {
      */
     private async getCodeFiles(codebasePath: string): Promise<string[]> {
         const files: string[] = [];
+        const normalizedPath = path.resolve(codebasePath);
 
         const traverseDirectory = async (currentPath: string) => {
             const entries = await fs.promises.readdir(currentPath, { withFileTypes: true });
@@ -668,8 +679,8 @@ export class Context {
             for (const entry of entries) {
                 const fullPath = path.join(currentPath, entry.name);
 
-                // Check if path matches ignore patterns
-                if (this.matchesIgnorePattern(fullPath, codebasePath)) {
+                // Check if path matches ignore patterns using project-specific patterns
+                if (this.matchesIgnorePattern(fullPath, codebasePath, normalizedPath)) {
                     continue;
                 }
 
@@ -946,6 +957,8 @@ export class Context {
      * @param codebasePath Path to the codebase
      */
     private async loadIgnorePatterns(codebasePath: string): Promise<void> {
+        const normalizedPath = path.resolve(codebasePath);
+
         try {
             let fileBasedPatterns: string[] = [];
 
@@ -960,16 +973,25 @@ export class Context {
             const globalIgnorePatterns = await this.loadGlobalIgnoreFile();
             fileBasedPatterns.push(...globalIgnorePatterns);
 
-            // Merge file-based patterns with existing patterns (which may include custom MCP patterns)
+            // Store project-specific patterns (base patterns + file-based patterns)
+            const projectPatterns = [
+                ...DEFAULT_IGNORE_PATTERNS,
+                ...fileBasedPatterns
+            ];
+
+            // Remove duplicates
+            const uniqueProjectPatterns = [...new Set(projectPatterns)];
+            this.projectIgnorePatterns.set(normalizedPath, uniqueProjectPatterns);
+
             if (fileBasedPatterns.length > 0) {
-                this.addCustomIgnorePatterns(fileBasedPatterns);
-                console.log(`[Context] 🚫 Loaded total ${fileBasedPatterns.length} ignore patterns from all ignore files`);
+                console.log(`[Context] 🚫 Loaded ${fileBasedPatterns.length} project-specific ignore patterns for ${normalizedPath}`);
             } else {
-                console.log('📄 No ignore files found, keeping existing patterns');
+                console.log(`[Context] 📄 No project-specific ignore files found for ${normalizedPath}, using defaults`);
             }
         } catch (error) {
-            console.warn(`[Context] ⚠️ Failed to load ignore patterns: ${error}`);
-            // Continue with existing patterns on error - don't reset them
+            console.warn(`[Context] ⚠️ Failed to load ignore patterns for ${normalizedPath}: ${error}`);
+            // Store default patterns on error
+            this.projectIgnorePatterns.set(normalizedPath, [...DEFAULT_IGNORE_PATTERNS]);
         }
     }
 
@@ -1051,15 +1073,20 @@ export class Context {
      * @param basePath Base path for relative pattern matching
      * @returns True if path should be ignored
      */
-    private matchesIgnorePattern(filePath: string, basePath: string): boolean {
-        if (this.ignorePatterns.length === 0) {
+    private matchesIgnorePattern(filePath: string, basePath: string, projectPath?: string): boolean {
+        // Get project-specific patterns if available, otherwise fall back to global patterns
+        const patternsToUse = projectPath ?
+            this.getProjectIgnorePatterns(projectPath) :
+            this.ignorePatterns;
+
+        if (patternsToUse.length === 0) {
             return false;
         }
 
         const relativePath = path.relative(basePath, filePath);
         const normalizedPath = relativePath.replace(/\\/g, '/'); // Normalize path separators
 
-        for (const pattern of this.ignorePatterns) {
+        for (const pattern of patternsToUse) {
             if (this.isPatternMatch(normalizedPath, pattern)) {
                 return true;
             }
@@ -1135,7 +1162,7 @@ export class Context {
     }
 
     /**
-     * Get custom ignore patterns from environment variables  
+     * Get custom ignore patterns from environment variables
      * Supports CUSTOM_IGNORE_PATTERNS as comma-separated list
      * @returns Array of custom ignore patterns
      */
