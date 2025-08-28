@@ -42,9 +42,9 @@ Copy your Personal Key to replace `your-zilliz-cloud-api-key` in the configurati
 <details>
 <summary>Get OpenAI API Key for embedding model</summary>
 
-You need an OpenAI API key for the embedding model. You can get one by signing up at [OpenAI](https://platform.openai.com/api-keys).  
+You need an OpenAI API key for the embedding model. You can get one by signing up at [OpenAI](https://platform.openai.com/api-keys).
 
-Your API key will look like this: it always starts with `sk-`.  
+Your API key will look like this: it always starts with `sk-`.
 Copy your key and use it in the configuration examples below as `your-openai-api-key`.
 
 </details>
@@ -328,11 +328,11 @@ To configure Claude Context MCP in Augment Code, you can use either the graphica
 4. Add the server configuration to the `mcpServers` array in the `augment.advanced` object
 
 ```json
-"augment.advanced": { 
-  "mcpServers": [ 
-    { 
-      "name": "claude-context", 
-      "command": "npx", 
+"augment.advanced": {
+  "mcpServers": [
+    {
+      "name": "claude-context",
+      "command": "bunx",
       "args": ["-y", "@zilliz/claude-context-mcp@latest"],
       "env": {
         "OPENAI_API_KEY": "your-openai-api-key",
@@ -512,7 +512,7 @@ While MCP is the recommended way to use Claude Context with AI assistants, you c
 The `@zilliz/claude-context-core` package provides the fundamental functionality for code indexing and semantic search.
 
 ```typescript
-import { Context, MilvusVectorDatabase, OpenAIEmbedding } from '@zilliz/claude-context-core';
+import { Context, MilvusVectorDatabase, OpenAIEmbedding } from '@everwise/claude-context-core';
 
 // Initialize embedding provider
 const embedding = new OpenAIEmbedding({
@@ -642,7 +642,7 @@ We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) f
 
 **Package-specific contributing guides:**
 - [Core Package Contributing](packages/core/CONTRIBUTING.md)
-- [MCP Server Contributing](packages/mcp/CONTRIBUTING.md)  
+- [MCP Server Contributing](packages/mcp/CONTRIBUTING.md)
 - [VSCode Extension Contributing](packages/vscode-extension/CONTRIBUTING.md)
 
 ---

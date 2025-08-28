@@ -30,36 +30,36 @@ export function ensureAbsolutePath(inputPath: string): string {
  * Otherwise, return null.
  */
 export function findParentIndexedProject(
-    inputPath: string, 
+    inputPath: string,
     indexedCodebases: string[]
 ): string | null {
     const absolutePath = ensureAbsolutePath(inputPath);
-    
+
     // First check if this exact path is already indexed
     if (indexedCodebases.includes(absolutePath)) {
         return absolutePath;
     }
-    
+
     // Check if this path is a subdirectory of any indexed project
     for (const indexedPath of indexedCodebases) {
         // Normalize paths for comparison
         const normalizedIndexedPath = path.resolve(indexedPath);
         const normalizedInputPath = path.resolve(absolutePath);
-        
+
         // Check if inputPath is within indexedPath
         const relativePath = path.relative(normalizedIndexedPath, normalizedInputPath);
-        
+
         // If relative path doesn't start with '..' then inputPath is within indexedPath
         if (!relativePath.startsWith('..') && relativePath !== '') {
             console.log(`[PATH-RESOLUTION] Found parent project: ${normalizedIndexedPath} for subdirectory: ${normalizedInputPath}`);
             return normalizedIndexedPath;
         }
     }
-    
+
     return null;
 }
 
 export function trackCodebasePath(codebasePath: string): void {
     const absolutePath = ensureAbsolutePath(codebasePath);
     console.log(`[TRACKING] Tracked codebase path: ${absolutePath} (not marked as indexed)`);
-} 
+}

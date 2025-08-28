@@ -21,6 +21,10 @@ export interface ContextMcpConfig {
     // Vector database configuration
     milvusAddress?: string; // Optional, can be auto-resolved from token
     milvusToken?: string;
+    // Auto-update configuration
+    autoUpdateEnabled: boolean;
+    autoUpdateInterval: number; // milliseconds
+    autoUpdateSource: 'github-packages' | 'github-releases';
 }
 
 // Legacy format (v1) - for backward compatibility
@@ -146,6 +150,9 @@ export function createMcpConfig(): ContextMcpConfig {
     console.log(`[DEBUG]   RERANKING_MODEL: ${envManager.get('RERANKING_MODEL') || 'NOT SET'}`);
     console.log(`[DEBUG]   RERANKING_ENABLED: ${envManager.get('RERANKING_ENABLED') || 'NOT SET'}`);
     console.log(`[DEBUG]   MILVUS_ADDRESS: ${envManager.get('MILVUS_ADDRESS') || 'NOT SET'}`);
+    console.log(`[DEBUG]   AUTO_UPDATE: ${envManager.get('AUTO_UPDATE') || 'NOT SET'}`);
+    console.log(`[DEBUG]   UPDATE_CHECK_INTERVAL: ${envManager.get('UPDATE_CHECK_INTERVAL') || 'NOT SET'}`);
+    console.log(`[DEBUG]   UPDATE_SOURCE: ${envManager.get('UPDATE_SOURCE') || 'NOT SET'}`);
     console.log(`[DEBUG]   NODE_ENV: ${envManager.get('NODE_ENV') || 'NOT SET'}`);
 
     const config: ContextMcpConfig = {
@@ -170,7 +177,11 @@ export function createMcpConfig(): ContextMcpConfig {
             envManager.get('RERANKING_PROVIDER') === RerankingProvider.HuggingFace,
         // Vector database configuration - address can be auto-resolved from token
         milvusAddress: envManager.get('MILVUS_ADDRESS'), // Optional, can be resolved from token
-        milvusToken: envManager.get('MILVUS_TOKEN')
+        milvusToken: envManager.get('MILVUS_TOKEN'),
+        // Auto-update configuration
+        autoUpdateEnabled: envManager.get('AUTO_UPDATE') !== 'false', // Enabled by default, opt-out
+        autoUpdateInterval: parseInt(envManager.get('UPDATE_CHECK_INTERVAL') || '3600000', 10), // Default: 1 hour
+        autoUpdateSource: (envManager.get('UPDATE_SOURCE') as 'github-packages' | 'github-releases') || 'github-packages'
     };
 
     return config;
@@ -191,6 +202,13 @@ export function logConfigurationSummary(config: ContextMcpConfig): void {
         }`
     );
     console.log(`[MCP]   Milvus Address: ${config.milvusAddress || (config.milvusToken ? '[Auto-resolve from token]' : '[Not configured]')}`);
+    console.log(
+        `[MCP]   Auto-Update: ${
+            config.autoUpdateEnabled
+                ? `✅ Enabled (${config.autoUpdateSource}, every ${config.autoUpdateInterval / 1000 / 60} min)`
+                : '❌ Disabled'
+        }`
+    );
 
     // Log provider-specific configuration without exposing sensitive data
     switch (config.embeddingProvider) {
@@ -219,7 +237,7 @@ export function showHelpMessage(): void {
     console.log(`
 Context MCP Server
 
-Usage: npx @everwise/claude-context-mcp@latest [options]
+Usage: bunx @everwise/claude-context-mcp@latest [options]
 
 Options:
   --help, -h                          Show this help message
@@ -254,29 +272,37 @@ Environment Variables:
   MILVUS_ADDRESS          Milvus address (optional, can be auto-resolved from token)
   MILVUS_TOKEN            Milvus token (optional, used for authentication and address resolution)
 
+  Auto-Update Configuration:
+  AUTO_UPDATE             Enable/disable auto-updates: true, false (default: true)
+  UPDATE_CHECK_INTERVAL   Update check interval in milliseconds (default: 3600000 = 1 hour)
+  UPDATE_SOURCE           Update source: github-packages, github-releases (default: github-packages)
+
 Examples:
   # Start MCP server with OpenAI (default) and explicit Milvus address
-  OPENAI_API_KEY=sk-xxx MILVUS_ADDRESS=localhost:19530 npx @everwise/claude-context-mcp@latest
+  OPENAI_API_KEY=sk-xxx MILVUS_ADDRESS=localhost:19530 bunx @everwise/claude-context-mcp@latest
 
   # Start MCP server with OpenAI and specific model
-  OPENAI_API_KEY=sk-xxx EMBEDDING_MODEL=text-embedding-3-large MILVUS_TOKEN=your-token npx @everwise/claude-context-mcp@latest
+  OPENAI_API_KEY=sk-xxx EMBEDDING_MODEL=text-embedding-3-large MILVUS_TOKEN=your-token bunx @everwise/claude-context-mcp@latest
 
   # Start MCP server with VoyageAI and specific model
-  EMBEDDING_PROVIDER=VoyageAI VOYAGEAI_API_KEY=pa-xxx EMBEDDING_MODEL=voyage-3-large MILVUS_TOKEN=your-token npx @everwise/claude-context-mcp@latest
+  EMBEDDING_PROVIDER=VoyageAI VOYAGEAI_API_KEY=pa-xxx EMBEDDING_MODEL=voyage-3-large MILVUS_TOKEN=your-token bunx @everwise/claude-context-mcp@latest
 
   # Start MCP server with Gemini and specific model
-  EMBEDDING_PROVIDER=Gemini GEMINI_API_KEY=xxx EMBEDDING_MODEL=gemini-embedding-001 MILVUS_TOKEN=your-token npx @everwise/claude-context-mcp@latest
+  EMBEDDING_PROVIDER=Gemini GEMINI_API_KEY=xxx EMBEDDING_MODEL=gemini-embedding-001 MILVUS_TOKEN=your-token bunx @everwise/claude-context-mcp@latest
 
   # Start MCP server with Ollama and specific model (using OLLAMA_MODEL)
-  EMBEDDING_PROVIDER=Ollama OLLAMA_MODEL=mxbai-embed-large MILVUS_TOKEN=your-token npx @everwise/claude-context-mcp@latest
+  EMBEDDING_PROVIDER=Ollama OLLAMA_MODEL=mxbai-embed-large MILVUS_TOKEN=your-token bunx @everwise/claude-context-mcp@latest
 
   # Start MCP server with Ollama and specific model (using EMBEDDING_MODEL)
-  EMBEDDING_PROVIDER=Ollama EMBEDDING_MODEL=nomic-embed-text MILVUS_TOKEN=your-token npx @everwise/claude-context-mcp@latest
+  EMBEDDING_PROVIDER=Ollama EMBEDDING_MODEL=nomic-embed-text MILVUS_TOKEN=your-token bunx @everwise/claude-context-mcp@latest
 
   # Start MCP server with HuggingFace reranking enabled
-  OPENAI_API_KEY=sk-xxx RERANKING_PROVIDER=HuggingFace MILVUS_TOKEN=your-token npx @everwise/claude-context-mcp@latest
+  OPENAI_API_KEY=sk-xxx RERANKING_PROVIDER=HuggingFace MILVUS_TOKEN=your-token bunx @everwise/claude-context-mcp@latest
 
   # Start MCP server with custom reranking model
-  OPENAI_API_KEY=sk-xxx RERANKING_PROVIDER=HuggingFace RERANKING_MODEL=jinaai/jina-reranker-v2-base-multilingual MILVUS_TOKEN=your-token npx @everwise/claude-context-mcp@latest
+  OPENAI_API_KEY=sk-xxx RERANKING_PROVIDER=HuggingFace RERANKING_MODEL=jinaai/jina-reranker-v2-base-multilingual MILVUS_TOKEN=your-token bunx @everwise/claude-context-mcp@latest
+
+  # Start MCP server with auto-updates disabled
+  OPENAI_API_KEY=sk-xxx AUTO_UPDATE=false MILVUS_TOKEN=your-token bunx @everwise/claude-context-mcp@latest
         `);
 }

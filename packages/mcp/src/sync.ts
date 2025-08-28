@@ -61,7 +61,7 @@ export class SyncManager {
                     const stats = await this.context.reindexByChange(codebasePath);
                     const codebaseElapsed = Date.now() - codebaseStartTime;
 
-                    console.log(`[SYNC-DEBUG] Reindex stats for '${codebasePath}':`, stats);
+                    console.log(`[SYNC-DEBUG] Reindex stats for '${codebasePath}':`, JSON.stringify(stats, null, 2));
                     console.log(`[SYNC-DEBUG] Codebase sync completed in ${codebaseElapsed}ms`);
 
                     // Accumulate total stats
@@ -140,4 +140,4 @@ export class SyncManager {
 
         console.log('[SYNC-DEBUG] Background sync setup complete. Interval ID:', syncInterval);
     }
-} 
+}

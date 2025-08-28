@@ -22,13 +22,13 @@ OPENAI_API_KEY=your-openai-api-key
 ```
 
 #### Zilliz Cloud configuration
-Get a free Milvus vector database on Zilliz Cloud. 
+Get a free Milvus vector database on Zilliz Cloud.
 
 Claude Context needs a vector database. You can [sign up](https://cloud.zilliz.com/signup?utm_source=github&utm_medium=referral&utm_campaign=2507-codecontext-readme) on Zilliz Cloud to get a free Serverless cluster.
 
 ![](../../assets/signup_and_create_cluster.jpeg)
 
-After creating your cluster, open your Zilliz Cloud console and copy both the **public endpoint** and your **API key**.  
+After creating your cluster, open your Zilliz Cloud console and copy both the **public endpoint** and your **API key**.
 These will be used as `your-zilliz-cloud-public-endpoint` and `your-zilliz-cloud-api-key` in the configuration examples.
 
 ![Zilliz Cloud Dashboard](../../assets/zilliz_cloud_dashboard.jpeg)
@@ -40,18 +40,18 @@ If you need help creating your free vector database or finding these values, see
 ```bash
 MILVUS_ADDRESS=your-zilliz-cloud-public-endpoint
 MILVUS_TOKEN=your-zilliz-cloud-api-key
-``` 
+```
 
 > 💡 **Tip**: For easier configuration management across different usage scenarios, consider using [global environment variables](../../docs/getting-started/environment-variables.md).
 
 ## Quick Start
 
 ```typescript
-import { 
-  Context, 
-  OpenAIEmbedding, 
-  MilvusVectorDatabase 
-} from '@zilliz/claude-context-core';
+import {
+  Context,
+  OpenAIEmbedding,
+  MilvusVectorDatabase
+} from '@everwise/claude-context-core';
 
 // Initialize embedding provider
 const embedding = new OpenAIEmbedding({
@@ -141,7 +141,7 @@ interface ContextConfig {
   // Programming languages
   '.ts', '.tsx', '.js', '.jsx', '.py', '.java', '.cpp', '.c', '.h', '.hpp',
   '.cs', '.go', '.rs', '.php', '.rb', '.swift', '.kt', '.scala', '.m', '.mm',
-  // Text and markup files  
+  // Text and markup files
   '.md', '.markdown', '.ipynb'
 ]
 ```
@@ -193,7 +193,7 @@ interface SemanticSearchResult {
 ### Using VoyageAI Embeddings
 
 ```typescript
-import { Context, MilvusVectorDatabase, VoyageAIEmbedding } from '@zilliz/claude-context-core';
+import { Context, MilvusVectorDatabase, VoyageAIEmbedding } from '@everwise/claude-context-core';
 
 // Initialize with VoyageAI embedding provider
 const embedding = new VoyageAIEmbedding({
