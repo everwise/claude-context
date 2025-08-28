@@ -17,6 +17,7 @@ import {
     HybridSearchResult
 } from './vectordb';
 import { SemanticSearchResult } from './types';
+import { BaseReranker, HuggingFaceReranker, RerankingConfig } from './reranking';
 import { envManager } from './utils/env-manager';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -94,6 +95,7 @@ export interface ContextConfig {
     ignorePatterns?: string[];
     customExtensions?: string[]; // New: custom extensions from MCP
     customIgnorePatterns?: string[]; // New: custom ignore patterns from MCP
+    reranking?: RerankingConfig; // New: reranking configuration
 }
 
 export class Context {
@@ -102,6 +104,7 @@ export class Context {
     private codeSplitter: Splitter;
     private supportedExtensions: string[];
     private ignorePatterns: string[];
+    private reranker: BaseReranker | null = null;
     private synchronizers = new Map<string, FileSynchronizer>();
 
     constructor(config: ContextConfig = {}) {
@@ -119,6 +122,14 @@ export class Context {
 
         this.codeSplitter = config.codeSplitter || new AstCodeSplitter(2500, 300);
 
+        // Initialize reranker if configured
+        if (config.reranking?.enabled) {
+            this.reranker = this.createReranker(config.reranking);
+            console.log(`[Context] 🔄 Initialized reranker: ${this.reranker.getProvider()} with model: ${config.reranking.model}`);
+        } else {
+            console.log(`[Context] 🚫 Reranking disabled`);
+        }
+
         // Load custom extensions from environment variables
         const envCustomExtensions = this.getCustomExtensionsFromEnv();
 
@@ -132,7 +143,7 @@ export class Context {
         // Remove duplicates
         this.supportedExtensions = [...new Set(allSupportedExtensions)];
 
-        // Load custom ignore patterns from environment variables  
+        // Load custom ignore patterns from environment variables
         const envCustomIgnorePatterns = this.getCustomIgnorePatternsFromEnv();
 
         // Start with default ignore patterns
@@ -190,6 +201,13 @@ export class Context {
     }
 
     /**
+     * Get reranker instance
+     */
+    getReranker(): BaseReranker | null {
+        return this.reranker;
+    }
+
+    /**
      * Get synchronizers map
      */
     getSynchronizers(): Map<string, FileSynchronizer> {
@@ -215,6 +233,15 @@ export class Context {
      */
     async getPreparedCollection(codebasePath: string): Promise<void> {
         return this.prepareCollection(codebasePath);
+    }
+
+    /**
+     * Create reranker instance based on configuration
+     */
+    private createReranker(config: RerankingConfig): BaseReranker {
+        // For now, only HuggingFace is supported
+        // This can be extended to support other providers in the future
+        return new HuggingFaceReranker(config);
     }
 
     /**
@@ -455,25 +482,57 @@ export class Context {
             console.log(`[Context] 🔍 Search request 1 (dense): anns_field="${searchRequests[0].anns_field}", vector_dim=${queryEmbedding.vector.length}, limit=${searchRequests[0].limit}`);
             console.log(`[Context] 🔍 Search request 2 (sparse): anns_field="${searchRequests[1].anns_field}", query_text="${query}", limit=${searchRequests[1].limit}`);
 
-            // 3. Execute hybrid search
-            console.log(`[Context] 🔍 Executing hybrid search with RRF reranking...`);
+            // 3. Execute hybrid search - get more results if cross-encoder reranking is enabled
+            const searchLimit = this.reranker?.isEnabled() ? Math.min(topK * 2, 50) : topK;
+            console.log(`[Context] 🔍 Executing hybrid search with RRF reranking (limit: ${searchLimit})...`);
+
+            // Update search requests with higher limits if reranking is enabled
+            const adjustedSearchRequests = searchRequests.map(req => ({
+                ...req,
+                limit: searchLimit
+            }));
+
             const searchResults: HybridSearchResult[] = await this.vectorDatabase.hybridSearch(
                 collectionName,
-                searchRequests,
+                adjustedSearchRequests,
                 {
                     rerank: {
                         strategy: 'rrf',
                         params: { k: 100 }
                     },
-                    limit: topK,
+                    limit: searchLimit,
                     filterExpr
                 }
             );
 
-            console.log(`[Context] 🔍 Raw search results count: ${searchResults.length}`);
+            console.log(`[Context] 🔍 Raw hybrid search results count: ${searchResults.length}`);
 
-            // 4. Convert to semantic search result format
-            const results: SemanticSearchResult[] = searchResults.map(result => ({
+            // 4. Apply cross-encoder reranking if enabled (after Milvus RRF reranking)
+            let finalSearchResults: HybridSearchResult[] | VectorSearchResult[] = searchResults;
+            if (this.reranker?.isEnabled() && searchResults.length > 0) {
+                console.log(`[Context] 🔄 Applying cross-encoder reranking to ${searchResults.length} hybrid results...`);
+                try {
+                    await this.reranker.initialize(); // Lazy initialization
+
+                    // Convert HybridSearchResult[] to VectorSearchResult[] for reranker
+                    const vectorResults: VectorSearchResult[] = searchResults.map(result => ({
+                        document: result.document,
+                        score: result.score
+                    }));
+
+                    const rerankedResults = await this.reranker.rerank(query, vectorResults, topK);
+                    finalSearchResults = rerankedResults;
+                    console.log(`[Context] ✅ Cross-encoder reranking completed: ${searchResults.length} → ${finalSearchResults.length} results`);
+                } catch (error: any) {
+                    console.warn(`[Context] ⚠️  Cross-encoder reranking failed, using RRF results:`, error.message);
+                    finalSearchResults = searchResults.slice(0, topK);
+                }
+            } else {
+                finalSearchResults = searchResults.slice(0, topK);
+            }
+
+            // 5. Convert to semantic search result format
+            const results: SemanticSearchResult[] = finalSearchResults.map(result => ({
                 content: result.document.content,
                 relativePath: result.document.relativePath,
                 startLine: result.document.startLine,
@@ -493,15 +552,32 @@ export class Context {
             // 1. Generate query vector
             const queryEmbedding: EmbeddingVector = await this.embedding.embed(query);
 
-            // 2. Search in vector database
+            // 2. Search in vector database - get more results if reranking is enabled
+            const searchLimit = this.reranker?.isEnabled() ? Math.min(topK * 2, 50) : topK;
             const searchResults: VectorSearchResult[] = await this.vectorDatabase.search(
                 collectionName,
                 queryEmbedding.vector,
-                { topK, threshold, filterExpr }
+                { topK: searchLimit, threshold, filterExpr }
             );
 
-            // 3. Convert to semantic search result format
-            const results: SemanticSearchResult[] = searchResults.map(result => ({
+            // 3. Apply reranking if enabled
+            let finalSearchResults = searchResults;
+            if (this.reranker?.isEnabled() && searchResults.length > 0) {
+                console.log(`[Context] 🔄 Applying reranking to ${searchResults.length} results...`);
+                try {
+                    await this.reranker.initialize(); // Lazy initialization
+                    finalSearchResults = await this.reranker.rerank(query, searchResults, topK);
+                    console.log(`[Context] ✅ Reranking completed: ${searchResults.length} → ${finalSearchResults.length} results`);
+                } catch (error: any) {
+                    console.warn(`[Context] ⚠️  Reranking failed, using original results:`, error.message);
+                    finalSearchResults = searchResults.slice(0, topK);
+                }
+            } else {
+                finalSearchResults = searchResults.slice(0, topK);
+            }
+
+            // 4. Convert to semantic search result format
+            const results: SemanticSearchResult[] = finalSearchResults.map(result => ({
                 content: result.document.content,
                 relativePath: result.document.relativePath,
                 startLine: result.document.startLine,
@@ -1135,7 +1211,7 @@ export class Context {
     }
 
     /**
-     * Get custom ignore patterns from environment variables  
+     * Get custom ignore patterns from environment variables
      * Supports CUSTOM_IGNORE_PATTERNS as comma-separated list
      * @returns Array of custom ignore patterns
      */
