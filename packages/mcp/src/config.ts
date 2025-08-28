@@ -1,4 +1,4 @@
-import { envManager } from "@zilliz/claude-context-core";
+import { envManager, RerankingProvider } from '@zilliz/claude-context-core';
 
 export interface ContextMcpConfig {
     name: string;
@@ -14,6 +14,10 @@ export interface ContextMcpConfig {
     // Ollama configuration
     ollamaModel?: string;
     ollamaHost?: string;
+    // Reranking configuration
+    rerankingProvider: RerankingProvider;
+    rerankingModel: string;
+    rerankingEnabled: boolean;
     // Vector database configuration
     milvusAddress?: string; // Optional, can be auto-resolved from token
     milvusToken?: string;
@@ -82,6 +86,18 @@ export function getDefaultModelForProvider(provider: string): string {
     }
 }
 
+// Helper function to get default reranking model for each provider
+export function getDefaultRerankingModelForProvider(provider: RerankingProvider): string {
+    switch (provider) {
+        case RerankingProvider.HuggingFace:
+            return 'jinaai/jina-reranker-v2-base-multilingual';
+        case RerankingProvider.Disabled:
+            return '';
+        default:
+            return 'jinaai/jina-reranker-v2-base-multilingual';
+    }
+}
+
 // Helper function to get embedding model with provider-specific environment variable priority
 export function getEmbeddingModelForProvider(provider: string): string {
     switch (provider) {
@@ -101,6 +117,23 @@ export function getEmbeddingModelForProvider(provider: string): string {
     }
 }
 
+// Helper function to get reranking model with environment variable priority
+export function getRerankingModelForProvider(provider: RerankingProvider): string {
+    switch (provider) {
+        case RerankingProvider.HuggingFace:
+            const selectedModel = envManager.get('RERANKING_MODEL') || getDefaultRerankingModelForProvider(provider);
+            console.log(
+                `[DEBUG] 🎯 ${provider} reranking model selection: RERANKING_MODEL=${
+                    envManager.get('RERANKING_MODEL') || 'NOT SET'
+                }, selected=${selectedModel}`
+            );
+            return selectedModel;
+        case RerankingProvider.Disabled:
+        default:
+            return getDefaultRerankingModelForProvider(provider);
+    }
+}
+
 export function createMcpConfig(): ContextMcpConfig {
     // Debug: Print all environment variables related to Context
     console.log(`[DEBUG] 🔍 Environment Variables Debug:`);
@@ -109,6 +142,9 @@ export function createMcpConfig(): ContextMcpConfig {
     console.log(`[DEBUG]   OLLAMA_MODEL: ${envManager.get('OLLAMA_MODEL') || 'NOT SET'}`);
     console.log(`[DEBUG]   GEMINI_API_KEY: ${envManager.get('GEMINI_API_KEY') ? 'SET (length: ' + envManager.get('GEMINI_API_KEY')!.length + ')' : 'NOT SET'}`);
     console.log(`[DEBUG]   OPENAI_API_KEY: ${envManager.get('OPENAI_API_KEY') ? 'SET (length: ' + envManager.get('OPENAI_API_KEY')!.length + ')' : 'NOT SET'}`);
+    console.log(`[DEBUG]   RERANKING_PROVIDER: ${envManager.get('RERANKING_PROVIDER') || 'NOT SET'}`);
+    console.log(`[DEBUG]   RERANKING_MODEL: ${envManager.get('RERANKING_MODEL') || 'NOT SET'}`);
+    console.log(`[DEBUG]   RERANKING_ENABLED: ${envManager.get('RERANKING_ENABLED') || 'NOT SET'}`);
     console.log(`[DEBUG]   MILVUS_ADDRESS: ${envManager.get('MILVUS_ADDRESS') || 'NOT SET'}`);
     console.log(`[DEBUG]   NODE_ENV: ${envManager.get('NODE_ENV') || 'NOT SET'}`);
 
@@ -126,6 +162,12 @@ export function createMcpConfig(): ContextMcpConfig {
         // Ollama configuration
         ollamaModel: envManager.get('OLLAMA_MODEL'),
         ollamaHost: envManager.get('OLLAMA_HOST'),
+        // Reranking configuration
+        rerankingProvider: (envManager.get('RERANKING_PROVIDER') as RerankingProvider) || RerankingProvider.Disabled,
+        rerankingModel: getRerankingModelForProvider((envManager.get('RERANKING_PROVIDER') as RerankingProvider) || RerankingProvider.Disabled),
+        rerankingEnabled:
+            envManager.get('RERANKING_ENABLED')?.toLowerCase() === 'true' ||
+            envManager.get('RERANKING_PROVIDER') === RerankingProvider.HuggingFace,
         // Vector database configuration - address can be auto-resolved from token
         milvusAddress: envManager.get('MILVUS_ADDRESS'), // Optional, can be resolved from token
         milvusToken: envManager.get('MILVUS_TOKEN')
@@ -141,6 +183,13 @@ export function logConfigurationSummary(config: ContextMcpConfig): void {
     console.log(`[MCP]   Server: ${config.name} v${config.version}`);
     console.log(`[MCP]   Embedding Provider: ${config.embeddingProvider}`);
     console.log(`[MCP]   Embedding Model: ${config.embeddingModel}`);
+    console.log(
+        `[MCP]   Reranking: ${
+            config.rerankingEnabled
+                ? `✅ Enabled (${config.rerankingProvider}: ${config.rerankingModel})`
+                : '❌ Disabled'
+        }`
+    );
     console.log(`[MCP]   Milvus Address: ${config.milvusAddress || (config.milvusToken ? '[Auto-resolve from token]' : '[Not configured]')}`);
 
     // Log provider-specific configuration without exposing sensitive data
@@ -178,21 +227,29 @@ Options:
 Environment Variables:
   MCP_SERVER_NAME         Server name
   MCP_SERVER_VERSION      Server version
-  
+
   Embedding Provider Configuration:
   EMBEDDING_PROVIDER      Embedding provider: OpenAI, VoyageAI, Gemini, Ollama (default: OpenAI)
   EMBEDDING_MODEL         Embedding model name (works for all providers)
-  
+
   Provider-specific API Keys:
   OPENAI_API_KEY          OpenAI API key (required for OpenAI provider)
   OPENAI_BASE_URL         OpenAI API base URL (optional, for custom endpoints)
   VOYAGEAI_API_KEY        VoyageAI API key (required for VoyageAI provider)
   GEMINI_API_KEY          Google AI API key (required for Gemini provider)
-  
+
   Ollama Configuration:
   OLLAMA_HOST             Ollama server host (default: http://127.0.0.1:11434)
   OLLAMA_MODEL            Ollama model name (alternative to EMBEDDING_MODEL for Ollama)
-  
+
+  Reranking Configuration (requires @huggingface/transformers):
+  RERANKING_PROVIDER      Reranking provider: HuggingFace, Disabled (default: Disabled)
+  RERANKING_MODEL         Reranking model name (default: jinaai/jina-reranker-v2-base-multilingual)
+  RERANKING_ENABLED       Enable reranking: true, false (default: false, auto-enabled if RERANKING_PROVIDER=HuggingFace)
+
+  📦 To install reranking dependencies:
+    npm install @huggingface/transformers  (or pnpm add @huggingface/transformers)
+
   Vector Database Configuration:
   MILVUS_ADDRESS          Milvus address (optional, can be auto-resolved from token)
   MILVUS_TOKEN            Milvus token (optional, used for authentication and address resolution)
@@ -200,20 +257,26 @@ Environment Variables:
 Examples:
   # Start MCP server with OpenAI (default) and explicit Milvus address
   OPENAI_API_KEY=sk-xxx MILVUS_ADDRESS=localhost:19530 npx @zilliz/claude-context-mcp@latest
-  
+
   # Start MCP server with OpenAI and specific model
   OPENAI_API_KEY=sk-xxx EMBEDDING_MODEL=text-embedding-3-large MILVUS_TOKEN=your-token npx @zilliz/claude-context-mcp@latest
-  
+
   # Start MCP server with VoyageAI and specific model
   EMBEDDING_PROVIDER=VoyageAI VOYAGEAI_API_KEY=pa-xxx EMBEDDING_MODEL=voyage-3-large MILVUS_TOKEN=your-token npx @zilliz/claude-context-mcp@latest
-  
+
   # Start MCP server with Gemini and specific model
   EMBEDDING_PROVIDER=Gemini GEMINI_API_KEY=xxx EMBEDDING_MODEL=gemini-embedding-001 MILVUS_TOKEN=your-token npx @zilliz/claude-context-mcp@latest
-  
+
   # Start MCP server with Ollama and specific model (using OLLAMA_MODEL)
   EMBEDDING_PROVIDER=Ollama OLLAMA_MODEL=mxbai-embed-large MILVUS_TOKEN=your-token npx @zilliz/claude-context-mcp@latest
-  
+
   # Start MCP server with Ollama and specific model (using EMBEDDING_MODEL)
   EMBEDDING_PROVIDER=Ollama EMBEDDING_MODEL=nomic-embed-text MILVUS_TOKEN=your-token npx @zilliz/claude-context-mcp@latest
+
+  # Start MCP server with HuggingFace reranking enabled
+  OPENAI_API_KEY=sk-xxx RERANKING_PROVIDER=HuggingFace MILVUS_TOKEN=your-token npx @zilliz/claude-context-mcp@latest
+
+  # Start MCP server with custom reranking model
+  OPENAI_API_KEY=sk-xxx RERANKING_PROVIDER=HuggingFace RERANKING_MODEL=jinaai/jina-reranker-v2-base-multilingual MILVUS_TOKEN=your-token npx @zilliz/claude-context-mcp@latest
         `);
-} 
+}

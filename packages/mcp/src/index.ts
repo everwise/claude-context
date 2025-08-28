@@ -65,10 +65,16 @@ class ContextMcpServer {
             ...(config.milvusToken && { token: config.milvusToken })
         });
 
-        // Initialize Claude Context
+        // Initialize Claude Context with reranking configuration
         this.context = new Context({
             embedding,
-            vectorDatabase
+            vectorDatabase,
+            ...(config.rerankingEnabled && {
+                reranking: {
+                    enabled: config.rerankingEnabled,
+                    model: config.rerankingModel
+                }
+            })
         });
 
         // Initialize managers
