@@ -3,7 +3,7 @@ import * as path from "path";
 import * as crypto from "crypto";
 import { Context, COLLECTION_LIMIT_MESSAGE } from "@zilliz/claude-context-core";
 import { SnapshotManager } from "./snapshot.js";
-import { ensureAbsolutePath, truncateContent, trackCodebasePath } from "./utils.js";
+import { ensureAbsolutePath, truncateContent, trackCodebasePath, findParentIndexedProject } from "./utils.js";
 
 export class ToolHandlers {
     private context: Context;
@@ -16,6 +16,29 @@ export class ToolHandlers {
         this.snapshotManager = snapshotManager;
         this.currentWorkspace = process.cwd();
         console.log(`[WORKSPACE] Current workspace: ${this.currentWorkspace}`);
+    }
+
+    /**
+     * Resolve a codebase path, auto-detecting parent projects for subdirectories
+     */
+    private resolveCodebasePath(inputPath: string, operation: string): { 
+        finalPath: string, 
+        resolutionMessage: string 
+    } {
+        const absolutePath = ensureAbsolutePath(inputPath);
+        const indexedCodebases = this.snapshotManager.getIndexedCodebases();
+        const indexingCodebases = this.snapshotManager.getIndexingCodebases();
+        const allCodebases = [...indexedCodebases, ...indexingCodebases];
+
+        const parentProject = findParentIndexedProject(absolutePath, allCodebases);
+        
+        if (parentProject && parentProject !== absolutePath) {
+            const message = `\nNote: ${operation} parent project '${parentProject}' as '${absolutePath}' is a subdirectory of this indexed project.`;
+            console.log(`[${operation.toUpperCase()}] Auto-resolved subdirectory '${absolutePath}' to parent project '${parentProject}'`);
+            return { finalPath: parentProject, resolutionMessage: message };
+        }
+        
+        return { finalPath: absolutePath, resolutionMessage: '' };
     }
 
     /**
@@ -445,17 +468,23 @@ export class ToolHandlers {
                 };
             }
 
-            trackCodebasePath(absolutePath);
+            // Resolve codebase path (handles subdirectory auto-detection)
+            const { finalPath: finalCodebasePath, resolutionMessage: pathResolutionMessage } = 
+                this.resolveCodebasePath(absolutePath, "Searching in");
 
-            // Check if this codebase is indexed or being indexed
-            const isIndexed = this.snapshotManager.getIndexedCodebases().includes(absolutePath);
-            const isIndexing = this.snapshotManager.getIndexingCodebases().includes(absolutePath);
+            trackCodebasePath(finalCodebasePath);
+
+            // Check if the resolved codebase is indexed or being indexed
+            const indexedCodebases = this.snapshotManager.getIndexedCodebases();
+            const indexingCodebases = this.snapshotManager.getIndexingCodebases();
+            const isIndexed = indexedCodebases.includes(finalCodebasePath);
+            const isIndexing = indexingCodebases.includes(finalCodebasePath);
 
             if (!isIndexed && !isIndexing) {
                 return {
                     content: [{
                         type: "text",
-                        text: `Error: Codebase '${absolutePath}' is not indexed. Please index it first using the index_codebase tool.`
+                        text: `Error: Codebase '${finalCodebasePath}' is not indexed. Please index it first using the index_codebase tool.`
                     }],
                     isError: true
                 };
@@ -467,7 +496,7 @@ export class ToolHandlers {
                 indexingStatusMessage = `\n⚠️  **Indexing in Progress**: This codebase is currently being indexed in the background. Search results may be incomplete until indexing completes.`;
             }
 
-            console.log(`[SEARCH] Searching in codebase: ${absolutePath}`);
+            console.log(`[SEARCH] Searching in codebase: ${finalCodebasePath}`);
             console.log(`[SEARCH] Query: "${query}"`);
             console.log(`[SEARCH] Indexing status: ${isIndexing ? 'In Progress' : 'Completed'}`);
 
@@ -494,9 +523,9 @@ export class ToolHandlers {
                 filterExpr = `fileExtension in [${quoted}]`;
             }
 
-            // Search in the specified codebase
+            // Search in the resolved codebase
             const searchResults = await this.context.semanticSearch(
-                absolutePath,
+                finalCodebasePath,
                 query,
                 Math.min(resultLimit, 50),
                 0.3,
@@ -506,10 +535,11 @@ export class ToolHandlers {
             console.log(`[SEARCH] ✅ Search completed! Found ${searchResults.length} results using ${embeddingProvider.getProvider()} embeddings`);
 
             if (searchResults.length === 0) {
-                let noResultsMessage = `No results found for query: "${query}" in codebase '${absolutePath}'`;
+                let noResultsMessage = `No results found for query: "${query}" in codebase '${finalCodebasePath}'`;
                 if (isIndexing) {
                     noResultsMessage += `\n\nNote: This codebase is still being indexed. Try searching again after indexing completes, or the query may not match any indexed content.`;
                 }
+                noResultsMessage += pathResolutionMessage;
                 return {
                     content: [{
                         type: "text",
@@ -522,7 +552,7 @@ export class ToolHandlers {
             const formattedResults = searchResults.map((result: any, index: number) => {
                 const location = `${result.relativePath}:${result.startLine}-${result.endLine}`;
                 const context = truncateContent(result.content, 5000);
-                const codebaseInfo = path.basename(absolutePath);
+                const codebaseInfo = path.basename(finalCodebasePath);
 
                 return `${index + 1}. Code snippet (${result.language}) [${codebaseInfo}]\n` +
                     `   Location: ${location}\n` +
@@ -530,7 +560,7 @@ export class ToolHandlers {
                     `   Context: \n\`\`\`${result.language}\n${context}\n\`\`\`\n`;
             }).join('\n');
 
-            let resultMessage = `Found ${searchResults.length} results for query: "${query}" in codebase '${absolutePath}'${indexingStatusMessage}\n\n${formattedResults}`;
+            let resultMessage = `Found ${searchResults.length} results for query: "${query}" in codebase '${finalCodebasePath}'${indexingStatusMessage}${pathResolutionMessage}\n\n${formattedResults}`;
 
             if (isIndexing) {
                 resultMessage += `\n\n💡 **Tip**: This codebase is still being indexed. More results may become available as indexing progresses.`;
@@ -607,27 +637,33 @@ export class ToolHandlers {
                 };
             }
 
-            // Check if this codebase is indexed or being indexed
-            const isIndexed = this.snapshotManager.getIndexedCodebases().includes(absolutePath);
-            const isIndexing = this.snapshotManager.getIndexingCodebases().includes(absolutePath);
+            // Resolve codebase path (handles subdirectory auto-detection)
+            const { finalPath: finalCodebasePath, resolutionMessage: pathResolutionMessage } = 
+                this.resolveCodebasePath(absolutePath, "Clearing");
+
+            // Check if the resolved codebase is indexed or being indexed
+            const indexedCodebases = this.snapshotManager.getIndexedCodebases();
+            const indexingCodebases = this.snapshotManager.getIndexingCodebases();
+            const isIndexed = indexedCodebases.includes(finalCodebasePath);
+            const isIndexing = indexingCodebases.includes(finalCodebasePath);
 
             if (!isIndexed && !isIndexing) {
                 return {
                     content: [{
                         type: "text",
-                        text: `Error: Codebase '${absolutePath}' is not indexed or being indexed.`
+                        text: `Error: Codebase '${finalCodebasePath}' is not indexed or being indexed.`
                     }],
                     isError: true
                 };
             }
 
-            console.log(`[CLEAR] Clearing codebase: ${absolutePath}`);
+            console.log(`[CLEAR] Clearing codebase: ${finalCodebasePath}`);
 
             try {
-                await this.context.clearIndex(absolutePath);
-                console.log(`[CLEAR] Successfully cleared index for: ${absolutePath}`);
+                await this.context.clearIndex(finalCodebasePath);
+                console.log(`[CLEAR] Successfully cleared index for: ${finalCodebasePath}`);
             } catch (error: any) {
-                const errorMsg = `Failed to clear ${absolutePath}: ${error.message}`;
+                const errorMsg = `Failed to clear ${finalCodebasePath}: ${error.message}`;
                 console.error(`[CLEAR] ${errorMsg}`);
                 return {
                     content: [{
@@ -639,7 +675,7 @@ export class ToolHandlers {
             }
 
             // Completely remove the cleared codebase from snapshot
-            this.snapshotManager.removeCodebaseCompletely(absolutePath);
+            this.snapshotManager.removeCodebaseCompletely(finalCodebasePath);
 
             // Reset indexing stats if this was the active codebase
             this.indexingStats = null;
@@ -647,7 +683,7 @@ export class ToolHandlers {
             // Save snapshot after clearing index
             this.snapshotManager.saveCodebaseSnapshot();
 
-            let resultText = `Successfully cleared codebase '${absolutePath}'`;
+            let resultText = `Successfully cleared codebase '${finalCodebasePath}'${pathResolutionMessage}`;
 
             const remainingIndexed = this.snapshotManager.getIndexedCodebases().length;
             const remainingIndexing = this.snapshotManager.getIndexingCodebases().length;
@@ -718,9 +754,13 @@ export class ToolHandlers {
                 };
             }
 
+            // Resolve codebase path (handles subdirectory auto-detection)
+            const { finalPath: finalCodebasePath, resolutionMessage: pathResolutionMessage } = 
+                this.resolveCodebasePath(absolutePath, "Showing status for");
+
             // Check indexing status using new status system
-            const status = this.snapshotManager.getCodebaseStatus(absolutePath);
-            const info = this.snapshotManager.getCodebaseInfo(absolutePath);
+            const status = this.snapshotManager.getCodebaseStatus(finalCodebasePath);
+            const info = this.snapshotManager.getCodebaseInfo(finalCodebasePath);
 
             let statusMessage = '';
 
@@ -728,12 +768,12 @@ export class ToolHandlers {
                 case 'indexed':
                     if (info && 'indexedFiles' in info) {
                         const indexedInfo = info as any;
-                        statusMessage = `✅ Codebase '${absolutePath}' is fully indexed and ready for search.`;
+                        statusMessage = `✅ Codebase '${finalCodebasePath}' is fully indexed and ready for search.`;
                         statusMessage += `\n📊 Statistics: ${indexedInfo.indexedFiles} files, ${indexedInfo.totalChunks} chunks`;
                         statusMessage += `\n📅 Status: ${indexedInfo.indexStatus}`;
                         statusMessage += `\n🕐 Last updated: ${new Date(indexedInfo.lastUpdated).toLocaleString()}`;
                     } else {
-                        statusMessage = `✅ Codebase '${absolutePath}' is fully indexed and ready for search.`;
+                        statusMessage = `✅ Codebase '${finalCodebasePath}' is fully indexed and ready for search.`;
                     }
                     break;
 
@@ -741,7 +781,7 @@ export class ToolHandlers {
                     if (info && 'indexingPercentage' in info) {
                         const indexingInfo = info as any;
                         const progressPercentage = indexingInfo.indexingPercentage || 0;
-                        statusMessage = `🔄 Codebase '${absolutePath}' is currently being indexed. Progress: ${progressPercentage.toFixed(1)}%`;
+                        statusMessage = `🔄 Codebase '${finalCodebasePath}' is currently being indexed. Progress: ${progressPercentage.toFixed(1)}%`;
 
                         // Add more detailed status based on progress
                         if (progressPercentage < 10) {
@@ -751,14 +791,14 @@ export class ToolHandlers {
                         }
                         statusMessage += `\n🕐 Last updated: ${new Date(indexingInfo.lastUpdated).toLocaleString()}`;
                     } else {
-                        statusMessage = `🔄 Codebase '${absolutePath}' is currently being indexed.`;
+                        statusMessage = `🔄 Codebase '${finalCodebasePath}' is currently being indexed.`;
                     }
                     break;
 
                 case 'indexfailed':
                     if (info && 'errorMessage' in info) {
                         const failedInfo = info as any;
-                        statusMessage = `❌ Codebase '${absolutePath}' indexing failed.`;
+                        statusMessage = `❌ Codebase '${finalCodebasePath}' indexing failed.`;
                         statusMessage += `\n🚨 Error: ${failedInfo.errorMessage}`;
                         if (failedInfo.lastAttemptedPercentage !== undefined) {
                             statusMessage += `\n📊 Failed at: ${failedInfo.lastAttemptedPercentage.toFixed(1)}% progress`;
@@ -766,13 +806,13 @@ export class ToolHandlers {
                         statusMessage += `\n🕐 Failed at: ${new Date(failedInfo.lastUpdated).toLocaleString()}`;
                         statusMessage += `\n💡 You can retry indexing by running the index_codebase command again.`;
                     } else {
-                        statusMessage = `❌ Codebase '${absolutePath}' indexing failed. You can retry indexing.`;
+                        statusMessage = `❌ Codebase '${finalCodebasePath}' indexing failed. You can retry indexing.`;
                     }
                     break;
 
                 case 'not_found':
                 default:
-                    statusMessage = `❌ Codebase '${absolutePath}' is not indexed. Please use the index_codebase tool to index it first.`;
+                    statusMessage = `❌ Codebase '${finalCodebasePath}' is not indexed. Please use the index_codebase tool to index it first.`;
                     break;
             }
 
@@ -783,7 +823,7 @@ export class ToolHandlers {
             return {
                 content: [{
                     type: "text",
-                    text: statusMessage + pathInfo
+                    text: statusMessage + pathInfo + pathResolutionMessage
                 }]
             };
 
