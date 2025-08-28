@@ -13,7 +13,7 @@
         "build:milvus": "./build.sh"
     },
     "dependencies": {
-        "@zilliz/claude-context-core": "workspace:*"
+        "@everwise/claude-context-core": "workspace:*"
     },
     "overrides": {
         "@zilliz/milvus2-sdk-node": false
