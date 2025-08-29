@@ -18,6 +18,7 @@ import {
 } from './vectordb';
 import { SemanticSearchResult } from './types';
 import { BaseReranker, HuggingFaceReranker, RerankingConfig } from './reranking';
+import { SimpleQueryPreprocessor, QueryPreprocessorConfig, PreprocessingResult } from './query';
 import { envManager } from './utils/env-manager';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -96,6 +97,7 @@ export interface ContextConfig {
     customExtensions?: string[]; // New: custom extensions from MCP
     customIgnorePatterns?: string[]; // New: custom ignore patterns from MCP
     reranking?: RerankingConfig; // New: reranking configuration
+    queryPreprocessor?: QueryPreprocessorConfig; // New: query preprocessing configuration
 }
 
 export class Context {
@@ -105,6 +107,7 @@ export class Context {
     private supportedExtensions: string[];
     private ignorePatterns: string[];
     private reranker: BaseReranker | null = null;
+    private queryPreprocessor: SimpleQueryPreprocessor;
     private synchronizers = new Map<string, FileSynchronizer>();
     private projectIgnorePatterns = new Map<string, string[]>(); // Per-project isolation
 
@@ -130,6 +133,10 @@ export class Context {
         } else {
             console.log(`[Context] 🚫 Reranking disabled`);
         }
+
+        // Initialize query preprocessor
+        this.queryPreprocessor = new SimpleQueryPreprocessor(config.queryPreprocessor);
+        console.log(`[Context] 🔍 Initialized query preprocessor with configuration`);
 
         // Load custom extensions from environment variables
         const envCustomExtensions = this.getCustomExtensionsFromEnv();
@@ -437,6 +444,155 @@ export class Context {
     }
 
     /**
+     * Select the best search query from preprocessing results
+     * @param preprocessingResult Result from query preprocessing
+     * @returns The most effective query variant for search
+     */
+    private selectBestSearchQuery(preprocessingResult: PreprocessingResult): string {
+        const { originalQuery, expandedTerms, detectedPatterns } = preprocessingResult;
+        
+        // Strategy 1: If we have filename patterns, prioritize variants with filenames
+        const filenamePatterns = detectedPatterns.filter(p => p.startsWith('filename:'));
+        if (filenamePatterns.length > 0) {
+            const filenameQuery = expandedTerms.find(term => 
+                filenamePatterns.some(pattern => 
+                    term.includes(pattern.substring(9)) // Remove 'filename:' prefix
+                )
+            );
+            if (filenameQuery && filenameQuery !== originalQuery) {
+                console.log(`[Context] 🎯 Using filename-enhanced query: "${filenameQuery}"`);
+                return filenameQuery;
+            }
+        }
+
+        // Strategy 2: If we have language patterns, prefer variants with language-specific terms
+        const languagePatterns = detectedPatterns.filter(p => p.startsWith('language:'));
+        if (languagePatterns.length > 0) {
+            const languageQuery = expandedTerms.find(term => 
+                languagePatterns.some(pattern => {
+                    const lang = pattern.substring(9); // Remove 'language:' prefix
+                    return term.toLowerCase().includes(lang) && term !== originalQuery;
+                })
+            );
+            if (languageQuery) {
+                console.log(`[Context] 🎯 Using language-enhanced query: "${languageQuery}"`);
+                return languageQuery;
+            }
+        }
+
+        // Strategy 3: Look for implementation-focused variants (contain 'function', 'class', 'implementation', etc.)
+        const implementationTerms = ['function', 'class', 'method', 'implementation', 'definition'];
+        const implQuery = expandedTerms.find(term => 
+            term !== originalQuery && 
+            implementationTerms.some(implTerm => term.toLowerCase().includes(implTerm))
+        );
+        if (implQuery) {
+            console.log(`[Context] 🎯 Using implementation-focused query: "${implQuery}"`);
+            return implQuery;
+        }
+
+        // Strategy 4: Prefer expanded technical terms over abbreviations
+        const technicalQuery = expandedTerms.find(term => 
+            term !== originalQuery && 
+            (term.includes('javascript') || term.includes('python') || term.includes('typescript') ||
+             term.includes('authentication') || term.includes('configuration') || term.includes('database'))
+        );
+        if (technicalQuery) {
+            console.log(`[Context] 🎯 Using technical term expansion: "${technicalQuery}"`);
+            return technicalQuery;
+        }
+
+        // Strategy 5: Use the longest variant (likely has most context)
+        if (expandedTerms.length > 1) {
+            const longestVariant = expandedTerms.reduce((longest, current) => 
+                current.length > longest.length ? current : longest
+            );
+            if (longestVariant !== originalQuery) {
+                console.log(`[Context] 🎯 Using longest variant: "${longestVariant}"`);
+                return longestVariant;
+            }
+        }
+
+        // Fallback: Use normalized query (original behavior)
+        console.log(`[Context] 🎯 Using normalized query: "${preprocessingResult.normalizedQuery}"`);
+        return preprocessingResult.normalizedQuery;
+    }
+
+    /**
+     * Select the top N search queries based on different strategies
+     * @param preprocessingResult Result from query preprocessing  
+     * @param maxQueries Maximum number of queries to return
+     * @returns Array of the most promising query variants
+     */
+    private selectTopSearchQueries(preprocessingResult: PreprocessingResult, maxQueries: number = 3): string[] {
+        const { originalQuery, expandedTerms, detectedPatterns } = preprocessingResult;
+        const selectedQueries: string[] = [];
+        const usedQueries = new Set<string>();
+
+        // Priority 1: Filename-enhanced queries
+        const filenamePatterns = detectedPatterns.filter(p => p.startsWith('filename:'));
+        if (filenamePatterns.length > 0 && selectedQueries.length < maxQueries) {
+            const filenameQuery = expandedTerms.find(term => 
+                filenamePatterns.some(pattern => term.includes(pattern.substring(9))) &&
+                !usedQueries.has(term)
+            );
+            if (filenameQuery) {
+                selectedQueries.push(filenameQuery);
+                usedQueries.add(filenameQuery);
+            }
+        }
+
+        // Priority 2: Technical term expansions (js->javascript, auth->authentication)
+        if (selectedQueries.length < maxQueries) {
+            const technicalQuery = expandedTerms.find(term => 
+                term !== originalQuery &&
+                !usedQueries.has(term) &&
+                (term.includes('javascript') || term.includes('python') || term.includes('typescript') ||
+                 term.includes('authentication') || term.includes('configuration') || term.includes('database'))
+            );
+            if (technicalQuery) {
+                selectedQueries.push(technicalQuery);
+                usedQueries.add(technicalQuery);
+            }
+        }
+
+        // Priority 3: Implementation-focused variants
+        if (selectedQueries.length < maxQueries) {
+            const implementationTerms = ['function', 'class', 'method', 'implementation'];
+            const implQuery = expandedTerms.find(term => 
+                term !== originalQuery &&
+                !usedQueries.has(term) &&
+                implementationTerms.some(implTerm => term.toLowerCase().includes(implTerm))
+            );
+            if (implQuery) {
+                selectedQueries.push(implQuery);
+                usedQueries.add(implQuery);
+            }
+        }
+
+        // Fill remaining slots with longest unused variants
+        if (selectedQueries.length < maxQueries) {
+            const remainingVariants = expandedTerms
+                .filter(term => !usedQueries.has(term) && term !== originalQuery)
+                .sort((a, b) => b.length - a.length);
+            
+            for (const variant of remainingVariants) {
+                if (selectedQueries.length >= maxQueries) break;
+                selectedQueries.push(variant);
+                usedQueries.add(variant);
+            }
+        }
+
+        // Ensure we always have at least the original or normalized query
+        if (selectedQueries.length === 0) {
+            selectedQueries.push(preprocessingResult.normalizedQuery);
+        }
+
+        console.log(`[Context] 🎯 Selected queries: ${selectedQueries.map(q => `"${q}"`).join(', ')}`);
+        return selectedQueries;
+    }
+
+    /**
      * Semantic search with unified implementation
      * @param codebasePath Codebase path to search in
      * @param query Search query
@@ -447,6 +603,29 @@ export class Context {
         const isHybrid = this.getIsHybrid();
         const searchType = isHybrid === true ? 'hybrid search' : 'semantic search';
         console.log(`[Context] 🔍 Executing ${searchType}: "${query}" in ${codebasePath}`);
+
+        // Preprocess the query to generate enhanced variants
+        const preprocessingResult = this.queryPreprocessor.preprocessQueryWithMetadata(query);
+        console.log(`[Context] 🔍 Query preprocessing: ${preprocessingResult.reasoning}`);
+        console.log(`[Context] 🔍 Generated ${preprocessingResult.expandedTerms.length} query variants`);
+        if (preprocessingResult.detectedPatterns.length > 0) {
+            console.log(`[Context] 🔍 Detected patterns: ${preprocessingResult.detectedPatterns.join(', ')}`);
+        }
+
+        // Enhanced search with query variants
+        const useMultipleVariants = preprocessingResult.expandedTerms.length > 2 && preprocessingResult.detectedPatterns.length > 0;
+        
+        let searchQueries: string[];
+        if (useMultipleVariants) {
+            // Use top 3 most promising variants for multi-query search
+            searchQueries = this.selectTopSearchQueries(preprocessingResult, 3);
+            console.log(`[Context] 🔍 Using multi-query search with ${searchQueries.length} variants`);
+        } else {
+            // Use single best query
+            searchQueries = [this.selectBestSearchQuery(preprocessingResult)];
+        }
+        
+        const primarySearchQuery = searchQueries[0];
 
         const collectionName = this.getCollectionName(codebasePath);
         console.log(`[Context] 🔍 Using collection: ${collectionName}`);
@@ -468,8 +647,8 @@ export class Context {
             }
 
             // 1. Generate query vector
-            console.log(`[Context] 🔍 Generating embeddings for query: "${query}"`);
-            const queryEmbedding: EmbeddingVector = await this.embedding.embed(query);
+            console.log(`[Context] 🔍 Generating embeddings for query: "${primarySearchQuery}"`);
+            const queryEmbedding: EmbeddingVector = await this.embedding.embed(primarySearchQuery);
             console.log(`[Context] ✅ Generated embedding vector with dimension: ${queryEmbedding.vector.length}`);
             console.log(`[Context] 🔍 First 5 embedding values: [${queryEmbedding.vector.slice(0, 5).join(', ')}]`);
 
@@ -482,7 +661,7 @@ export class Context {
                     limit: topK
                 },
                 {
-                    data: query,
+                    data: primarySearchQuery,
                     anns_field: "sparse_vector",
                     param: { "drop_ratio_search": 0.2 },
                     limit: topK
@@ -490,7 +669,7 @@ export class Context {
             ];
 
             console.log(`[Context] 🔍 Search request 1 (dense): anns_field="${searchRequests[0].anns_field}", vector_dim=${queryEmbedding.vector.length}, limit=${searchRequests[0].limit}`);
-            console.log(`[Context] 🔍 Search request 2 (sparse): anns_field="${searchRequests[1].anns_field}", query_text="${query}", limit=${searchRequests[1].limit}`);
+            console.log(`[Context] 🔍 Search request 2 (sparse): anns_field="${searchRequests[1].anns_field}", query_text="${primarySearchQuery}", limit=${searchRequests[1].limit}`);
 
             // 3. Execute hybrid search - get more results if cross-encoder reranking is enabled
             const searchLimit = this.reranker?.isEnabled() ? Math.min(topK * 2, 50) : topK;
@@ -530,7 +709,7 @@ export class Context {
                         score: result.score
                     }));
 
-                    const rerankedResults = await this.reranker.rerank(query, vectorResults, topK);
+                    const rerankedResults = await this.reranker.rerank(primarySearchQuery, vectorResults, topK);
                     finalSearchResults = rerankedResults;
                     console.log(`[Context] ✅ Cross-encoder reranking completed: ${searchResults.length} → ${finalSearchResults.length} results`);
                 } catch (error: any) {
@@ -560,7 +739,7 @@ export class Context {
         } else {
             // Regular semantic search
             // 1. Generate query vector
-            const queryEmbedding: EmbeddingVector = await this.embedding.embed(query);
+            const queryEmbedding: EmbeddingVector = await this.embedding.embed(primarySearchQuery);
 
             // 2. Search in vector database - get more results if reranking is enabled
             const searchLimit = this.reranker?.isEnabled() ? Math.min(topK * 2, 50) : topK;
@@ -576,7 +755,7 @@ export class Context {
                 console.log(`[Context] 🔄 Applying reranking to ${searchResults.length} results...`);
                 try {
                     await this.reranker.initialize(); // Lazy initialization
-                    finalSearchResults = await this.reranker.rerank(query, searchResults, topK);
+                    finalSearchResults = await this.reranker.rerank(primarySearchQuery, searchResults, topK);
                     console.log(`[Context] ✅ Reranking completed: ${searchResults.length} → ${finalSearchResults.length} results`);
                 } catch (error: any) {
                     console.warn(`[Context] ⚠️  Reranking failed, using original results:`, error.message);
