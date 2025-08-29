@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { OpenAIEmbedding, OpenAIEmbeddingConfig, VoyageAIEmbedding, VoyageAIEmbeddingConfig, OllamaEmbedding, OllamaEmbeddingConfig, GeminiEmbedding, GeminiEmbeddingConfig, MilvusConfig, SplitterType, SplitterConfig, AstCodeSplitter, LangChainCodeSplitter } from '@everwise/claude-context-core';
+import { OpenAIEmbedding, OpenAIEmbeddingConfig, VoyageAIEmbedding, VoyageAIEmbeddingConfig, OllamaEmbedding, OllamaEmbeddingConfig, GeminiEmbedding, GeminiEmbeddingConfig, MilvusConfig, SplitterType, SplitterConfig, AstCodeSplitter, LangChainCodeSplitter, envManager } from '@everwise/claude-context-core';
 
 // Simplified Milvus configuration interface for frontend
 export interface MilvusWebConfig {
@@ -143,6 +143,7 @@ export class ConfigManager {
         this.context = context;
     }
 
+
     /**
      * Get embedding provider configuration information
      */
@@ -193,8 +194,16 @@ export class ConfigManager {
 
     /**
      * Get embedding provider configuration
+     * Uses env-first approach like MCP server, falls back to VSCode settings
      */
     getEmbeddingProviderConfig(): EmbeddingProviderConfig | undefined {
+        // Try environment first (like MCP server)
+        const envConfig = this.getEmbeddingProviderConfigFromEnv();
+        if (envConfig) {
+            return envConfig;
+        }
+
+        // Fallback to VSCode settings
         const config = vscode.workspace.getConfiguration(ConfigManager.CONFIG_KEY);
         const provider = config.get<string>('embeddingProvider.provider');
 
@@ -202,6 +211,63 @@ export class ConfigManager {
 
         const configObject = this.buildConfigObject(provider, config);
         if (!configObject) return undefined;
+
+        return {
+            provider: provider as 'OpenAI' | 'VoyageAI' | 'Ollama' | 'Gemini',
+            config: configObject
+        };
+    }
+
+    /**
+     * Get embedding provider configuration from environment variables
+     * Uses same direct approach as MCP server
+     */
+    private getEmbeddingProviderConfigFromEnv(): EmbeddingProviderConfig | undefined {
+        const provider = envManager.get('EMBEDDING_PROVIDER');
+        if (!provider) {
+            return undefined;
+        }
+
+        const providerInfo = ConfigManager.getProviderInfo(provider);
+        if (!providerInfo) return undefined;
+
+        const configObject: any = { ...providerInfo.defaultConfig };
+
+        // Map environment variables based on provider (simplified)
+        switch (provider.toLowerCase()) {
+            case 'openai':
+                configObject.apiKey = envManager.get('OPENAI_API_KEY');
+                configObject.baseURL = envManager.get('OPENAI_BASE_URL');
+                break;
+            case 'voyageai':
+                configObject.apiKey = envManager.get('VOYAGEAI_API_KEY');
+                break;
+            case 'ollama':
+                configObject.host = envManager.get('OLLAMA_HOST');
+                configObject.keepAlive = envManager.get('OLLAMA_KEEP_ALIVE');
+                break;
+            case 'gemini':
+                configObject.apiKey = envManager.get('GEMINI_API_KEY');
+                const outputDim = envManager.get('GEMINI_OUTPUT_DIMENSIONALITY');
+                if (outputDim) {
+                    configObject.outputDimensionality = parseInt(outputDim, 10);
+                }
+                break;
+        }
+
+        // Set model (prioritize EMBEDDING_MODEL, then OLLAMA_MODEL for Ollama)
+        const embeddingModel = envManager.get('EMBEDDING_MODEL') ||
+                              (provider.toLowerCase() === 'ollama' ? envManager.get('OLLAMA_MODEL') : undefined);
+        if (embeddingModel) {
+            configObject.model = embeddingModel;
+        }
+
+        // Validate required fields
+        for (const field of providerInfo.requiredFields) {
+            if (!configObject[field.name]) {
+                return undefined;
+            }
+        }
 
         return {
             provider: provider as 'OpenAI' | 'VoyageAI' | 'Ollama' | 'Gemini',
@@ -291,8 +357,16 @@ export class ConfigManager {
 
     /**
      * Get Milvus frontend configuration
+     * Uses env-first approach like MCP server
      */
     getMilvusConfig(): MilvusWebConfig | undefined {
+        // Try environment first (like MCP server)
+        const envConfig = this.getMilvusConfigFromEnv();
+        if (envConfig) {
+            return envConfig;
+        }
+
+        // Fallback to VSCode settings
         const config = vscode.workspace.getConfiguration(ConfigManager.CONFIG_KEY);
         const address = config.get<string>('milvus.address');
         const token = config.get<string>('milvus.token');
@@ -302,6 +376,21 @@ export class ConfigManager {
         return {
             address,
             token
+        };
+    }
+
+    /**
+     * Get Milvus configuration from environment variables
+     */
+    private getMilvusConfigFromEnv(): MilvusWebConfig | undefined {
+        const address = envManager.get('MILVUS_ADDRESS');
+        if (!address) {
+            return undefined;
+        }
+
+        return {
+            address,
+            token: envManager.get('MILVUS_TOKEN')
         };
     }
 
@@ -342,8 +431,16 @@ export class ConfigManager {
 
     /**
      * Get splitter configuration
+     * Uses env-first approach like MCP server
      */
     getSplitterConfig(): SplitterConfig | undefined {
+        // Try environment first (like MCP server)
+        const envConfig = this.getSplitterConfigFromEnv();
+        if (envConfig) {
+            return envConfig;
+        }
+
+        // Fallback to VSCode settings
         const config = vscode.workspace.getConfiguration(ConfigManager.CONFIG_KEY);
         const type = config.get<string>('splitter.type');
         const chunkSize = config.get<number>('splitter.chunkSize');
@@ -366,6 +463,26 @@ export class ConfigManager {
     }
 
     /**
+     * Get splitter configuration from environment variables
+     */
+    private getSplitterConfigFromEnv(): SplitterConfig | undefined {
+        const type = envManager.get('SPLITTER_TYPE') as SplitterType;
+        const chunkSizeStr = envManager.get('SPLITTER_CHUNK_SIZE');
+        const chunkOverlapStr = envManager.get('SPLITTER_CHUNK_OVERLAP');
+
+        // Only return env config if at least one env variable is set
+        if (!type && !chunkSizeStr && !chunkOverlapStr) {
+            return undefined;
+        }
+
+        return {
+            type: type || SplitterType.AST,
+            chunkSize: chunkSizeStr ? parseInt(chunkSizeStr, 10) || 1000 : 1000,
+            chunkOverlap: chunkOverlapStr ? parseInt(chunkOverlapStr, 10) || 200 : 200
+        };
+    }
+
+    /**
      * Save splitter configuration
      */
     async saveSplitterConfig(splitterConfig: SplitterConfig): Promise<void> {
@@ -379,4 +496,28 @@ export class ConfigManager {
         await workspaceConfig.update('splitter.chunkSize', splitterConfig.chunkSize || 1000, vscode.ConfigurationTarget.Global);
         await workspaceConfig.update('splitter.chunkOverlap', splitterConfig.chunkOverlap || 200, vscode.ConfigurationTarget.Global);
     }
+
+    /**
+     * Get auto-sync configuration
+     * Uses env-first approach like MCP server
+     */
+    getAutoSyncConfig(): { enabled: boolean; intervalMinutes: number } {
+        // Try environment first (like MCP server)
+        const enabledStr = envManager.get('AUTO_SYNC_ENABLED');
+        const intervalStr = envManager.get('AUTO_SYNC_INTERVAL_MINUTES');
+
+        if (enabledStr || intervalStr) {
+            const enabled = enabledStr ? enabledStr.toLowerCase() === 'true' : true;
+            const intervalMinutes = intervalStr ? parseInt(intervalStr, 10) || 5 : 5;
+            return { enabled, intervalMinutes };
+        }
+
+        // Fallback to VSCode settings
+        const config = vscode.workspace.getConfiguration(ConfigManager.CONFIG_KEY);
+        return {
+            enabled: config.get<boolean>('autoSync.enabled', true),
+            intervalMinutes: config.get<number>('autoSync.intervalMinutes', 5)
+        };
+    }
+
 }

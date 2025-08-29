@@ -246,6 +246,9 @@ importers:
       '@everwise/claude-context-core':
         specifier: workspace:*
         version: link:../core
+      dotenv:
+        specifier: ^16.5.0
+        version: 16.5.0
       web-tree-sitter:
         specifier: ^0.25.6
         version: 0.25.6

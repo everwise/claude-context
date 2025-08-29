@@ -93,9 +93,9 @@ async function runInitialSync() {
 }
 
 function setupAutoSync() {
-    const config = vscode.workspace.getConfiguration('semanticCodeSearch');
-    const autoSyncEnabled = config.get<boolean>('autoSync.enabled', true);
-    const autoSyncInterval = config.get<number>('autoSync.intervalMinutes', 5);
+    const autoSyncConfig = configManager.getAutoSyncConfig();
+    const autoSyncEnabled = autoSyncConfig.enabled;
+    const autoSyncInterval = autoSyncConfig.intervalMinutes;
 
     // Stop existing auto-sync if running
     if (autoSyncDisposable) {
