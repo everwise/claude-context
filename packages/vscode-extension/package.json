@@ -172,7 +172,8 @@
     "lint:fix": "eslint src --fix",
     "typecheck": "tsc --noEmit",
     "package": "vsce package --no-dependencies",
-    "release": "vsce publish --no-dependencies"
+    "release": "vsce publish --no-dependencies",
+    "release:github": "pnpm run package && gh release create \"${GITHUB_REF_NAME:-$(git describe --tags --abbrev=0)}\" *.vsix --title \"Claude Context ${GITHUB_REF_NAME:-$(git describe --tags --abbrev=0)}\" --generate-notes"
   },
   "dependencies": {
     "@everwise/claude-context-core": "workspace:*",

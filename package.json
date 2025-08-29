@@ -20,6 +20,7 @@
     "release:mcp": "pnpm --filter @everwise/claude-context-mcp... run build && pnpm --filter @everwise/claude-context-mcp publish --access public --no-git-checks",
     "release:all": "pnpm build && pnpm release:core && pnpm release:mcp",
     "release:vscode": "pnpm --filter @everwise/claude-context-core build && pnpm --filter semanticcodesearch run webpack && pnpm --filter semanticcodesearch release",
+    "release:vscode-github": "pnpm --filter @everwise/claude-context-core build && pnpm --filter semanticcodesearch run webpack && pnpm --filter semanticcodesearch release:github",
     "example:basic": "pnpm --filter claude-context-basic-example start",
     "link": "pnpm --filter @everwise/claude-context-mcp -g link"
   },

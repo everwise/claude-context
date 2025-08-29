@@ -87,6 +87,21 @@ module.exports = {
             path.resolve(__dirname, 'src/stubs/ast-splitter-stub.js')
         ),
 
+        // Ignore HuggingFace transformers and related dependencies for reranking
+        new webpack.IgnorePlugin({
+            resourceRegExp: /@huggingface\/transformers/
+        }),
+
+        // Ignore ONNX Runtime native binaries that cause webpack parsing errors
+        new webpack.IgnorePlugin({
+            resourceRegExp: /onnxruntime_binding\.node$/
+        }),
+
+        // Ignore Sharp native binaries
+        new webpack.IgnorePlugin({
+            resourceRegExp: /@img\/sharp/
+        }),
+
         // Copy web-tree-sitter.wasm and language parsers to dist directory for runtime loading
         new CopyWebpackPlugin({
             patterns: [
