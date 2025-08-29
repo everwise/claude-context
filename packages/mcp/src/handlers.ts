@@ -523,14 +523,22 @@ export class ToolHandlers {
                 filterExpr = `fileExtension in [${quoted}]`;
             }
 
-            // Search in the resolved codebase
-            const searchResults = await this.context.semanticSearch(
-                finalCodebasePath,
-                query,
-                Math.min(resultLimit, 50),
-                0.3,
-                filterExpr
-            );
+            // Search in the resolved codebase (use PRF if available)
+            const searchResults = (this.context as any).prfEngine
+                ? await (this.context as any).semanticSearchWithPRF(
+                    finalCodebasePath,
+                    query,
+                    Math.min(resultLimit, 50),
+                    0.3,
+                    filterExpr
+                )
+                : await this.context.semanticSearch(
+                    finalCodebasePath,
+                    query,
+                    Math.min(resultLimit, 50),
+                    0.3,
+                    filterExpr
+                );
 
             console.log(`[SEARCH] ✅ Search completed! Found ${searchResults.length} results using ${embeddingProvider.getProvider()} embeddings`);
 
