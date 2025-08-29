@@ -1,6 +1,6 @@
 {
   "name": "@everwise/claude-context-mcp",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "Model Context Protocol integration for Claude Context",
   "type": "module",
   "main": "dist/index.js",
