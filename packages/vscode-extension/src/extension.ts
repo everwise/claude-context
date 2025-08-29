@@ -5,8 +5,7 @@ import { SearchCommand } from './commands/searchCommand';
 import { IndexCommand } from './commands/indexCommand';
 import { SyncCommand } from './commands/syncCommand';
 import { ConfigManager } from './config/configManager';
-import { Context, OpenAIEmbedding, VoyageAIEmbedding, GeminiEmbedding, MilvusRestfulVectorDatabase, AstCodeSplitter, LangChainCodeSplitter, SplitterType } from '@everwise/claude-context-core';
-import { envManager } from '@everwise/claude-context-core';
+import { Context, OpenAIEmbedding, VoyageAIEmbedding, GeminiEmbedding, MilvusRestfulVectorDatabase, AstCodeSplitter, LangChainCodeSplitter, SplitterType, envManager, DEFAULT_PRF_CONFIG } from '@everwise/claude-context-core';
 
 let semanticSearchProvider: SemanticSearchViewProvider;
 let searchCommand: SearchCommand;
@@ -173,6 +172,26 @@ function createContextWithConfig(configManager: ConfigManager): Context {
             contextConfig.codeSplitter = codeSplitter;
             console.log('No splitter configuration found, using default AST splitter (chunkSize: 2500, overlap: 300)');
         }
+
+        // Add PRF configuration from environment variables (similar to MCP server)
+        const prfEnabled = envManager.get('PRF_ENABLED')?.toLowerCase() === 'true';
+        if (prfEnabled) {
+            contextConfig.prf = {
+                enabled: prfEnabled,
+                topK: parseInt(envManager.get('PRF_TOP_K') || DEFAULT_PRF_CONFIG.topK.toString(), 10),
+                expansionTerms: parseInt(envManager.get('PRF_EXPANSION_TERMS') || DEFAULT_PRF_CONFIG.expansionTerms.toString(), 10),
+                minTermFreq: parseInt(envManager.get('PRF_MIN_TERM_FREQ') || DEFAULT_PRF_CONFIG.minTermFreq.toString(), 10),
+                originalWeight: parseFloat(envManager.get('PRF_ORIGINAL_WEIGHT') || DEFAULT_PRF_CONFIG.originalWeight.toString()),
+                codeTokens: envManager.get('PRF_CODE_TOKENS')?.toLowerCase() !== 'false',
+                minTermLength: parseInt(envManager.get('PRF_MIN_TERM_LENGTH') || DEFAULT_PRF_CONFIG.minTermLength.toString(), 10),
+                stopWords: envManager.get('PRF_STOP_WORDS')
+                    ? new Set(envManager.get('PRF_STOP_WORDS')!.split(',').map(w => w.trim()))
+                    : DEFAULT_PRF_CONFIG.stopWords
+            };
+
+            console.log(`PRF configured: enabled=${prfEnabled}, topK=${contextConfig.prf.topK}, expansionTerms=${contextConfig.prf.expansionTerms}, originalWeight=${contextConfig.prf.originalWeight}`);
+        }
+
         return new Context(contextConfig);
     } catch (error) {
         console.error('Failed to create Context with user config:', error);

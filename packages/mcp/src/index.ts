@@ -65,7 +65,7 @@ class ContextMcpServer {
             ...(config.milvusToken && { token: config.milvusToken })
         });
 
-        // Initialize Claude Context with reranking configuration
+        // Initialize Claude Context with reranking and PRF configuration
         this.context = new Context({
             embedding,
             vectorDatabase,
@@ -73,6 +73,18 @@ class ContextMcpServer {
                 reranking: {
                     enabled: config.rerankingEnabled,
                     model: config.rerankingModel
+                }
+            }),
+            ...(config.prfEnabled && {
+                prf: {
+                    enabled: config.prfEnabled,
+                    topK: config.prfTopK,
+                    expansionTerms: config.prfExpansionTerms,
+                    minTermFreq: config.prfMinTermFreq,
+                    originalWeight: config.prfOriginalWeight,
+                    codeTokens: config.prfCodeTokens,
+                    minTermLength: config.prfMinTermLength,
+                    stopWords: new Set(config.prfStopWords)
                 }
             })
         });

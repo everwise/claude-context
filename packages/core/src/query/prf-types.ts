@@ -5,25 +5,25 @@
 export interface PRFConfig {
     /** Enable PRF for query expansion */
     enabled: boolean;
-    
+
     /** Number of pseudo-relevant documents to analyze (research: 5-10 optimal) */
     topK: number;
-    
+
     /** Number of expansion terms to add to query (research: 5-10 optimal) */
     expansionTerms: number;
-    
+
     /** Minimum term frequency threshold to include term */
     minTermFreq: number;
-    
+
     /** Original query weight in interpolation (research: 0.6-0.8 for RM3) */
     originalWeight: number;
-    
+
     /** Enable code-aware tokenization (camelCase, snake_case splitting) */
     codeTokens: boolean;
-    
+
     /** Programming language stop words to filter out */
     stopWords: Set<string>;
-    
+
     /** Minimum term length to consider for expansion */
     minTermLength: number;
 }
@@ -34,16 +34,16 @@ export interface PRFConfig {
 export interface ExpansionTerm {
     /** The expansion term */
     term: string;
-    
+
     /** TF-IDF score of the term */
     score: number;
-    
+
     /** Total frequency across all pseudo-relevant documents */
     frequency: number;
-    
+
     /** Number of documents containing this term */
     documentCount: number;
-    
+
     /** Source of term extraction */
     source: 'tfidf' | 'frequency' | 'context';
 }
@@ -54,19 +54,19 @@ export interface ExpansionTerm {
 export interface PRFResult {
     /** Original input query */
     originalQuery: string;
-    
+
     /** Expanded query with PRF terms */
     expandedQuery: string;
-    
+
     /** Extracted expansion terms with scores */
     expansionTerms: ExpansionTerm[];
-    
+
     /** Number of pseudo-relevant documents analyzed */
     documentsAnalyzed: number;
-    
+
     /** Human-readable reasoning for the expansion */
     reasoning: string;
-    
+
     /** Processing time in milliseconds */
     processingTimeMs: number;
 }
@@ -75,9 +75,9 @@ export interface PRFResult {
  * Default PRF configuration based on research findings
  */
 export const DEFAULT_PRF_CONFIG: PRFConfig = {
-    enabled: false,                    // Opt-in for now
+    enabled: false,                   // Opt-in for now
     topK: 7,                          // Research sweet spot: 5-10
-    expansionTerms: 8,                // Research optimal: 5-10  
+    expansionTerms: 8,                // Research optimal: 5-10
     minTermFreq: 2,                   // Filter low-frequency terms
     originalWeight: 0.7,              // RM3 research: 0.6-0.8
     codeTokens: true,                 // Enable for code search
@@ -102,16 +102,16 @@ export const DEFAULT_PRF_CONFIG: PRFConfig = {
 export interface PRFStats {
     /** Total queries processed with PRF */
     totalQueries: number;
-    
+
     /** Average processing time in milliseconds */
     avgProcessingTime: number;
-    
+
     /** Average number of expansion terms generated */
     avgExpansionTerms: number;
-    
+
     /** Success rate (queries that generated valid expansions) */
     successRate: number;
-    
+
     /** Cache hit rate for repeated queries */
     cacheHitRate: number;
 }

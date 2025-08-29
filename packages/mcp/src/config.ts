@@ -1,4 +1,5 @@
-import { envManager, RerankingProvider } from '@everwise/claude-context-core';
+import { envManager, RerankingProvider, DEFAULT_PRF_CONFIG } from '@everwise/claude-context-core';
+import { VERSION } from './version.js';
 
 export interface ContextMcpConfig {
     name: string;
@@ -18,6 +19,15 @@ export interface ContextMcpConfig {
     rerankingProvider: RerankingProvider;
     rerankingModel: string;
     rerankingEnabled: boolean;
+    // PRF configuration
+    prfEnabled: boolean;
+    prfTopK: number;
+    prfExpansionTerms: number;
+    prfMinTermFreq: number;
+    prfOriginalWeight: number;
+    prfCodeTokens: boolean;
+    prfMinTermLength: number;
+    prfStopWords: string[];
     // Vector database configuration
     milvusAddress?: string; // Optional, can be auto-resolved from token
     milvusToken?: string;
@@ -138,6 +148,47 @@ export function getRerankingModelForProvider(provider: RerankingProvider): strin
     }
 }
 
+// Helper function to get PRF configuration with environment variable priority
+export function getPRFConfig(): {
+    enabled: boolean;
+    topK: number;
+    expansionTerms: number;
+    minTermFreq: number;
+    originalWeight: number;
+    codeTokens: boolean;
+    minTermLength: number;
+    stopWords: string[];
+} {
+    const enabled = envManager.get('PRF_ENABLED')?.toLowerCase() === 'true';
+    const topK = parseInt(envManager.get('PRF_TOP_K') || DEFAULT_PRF_CONFIG.topK.toString(), 10);
+    const expansionTerms = parseInt(envManager.get('PRF_EXPANSION_TERMS') || DEFAULT_PRF_CONFIG.expansionTerms.toString(), 10);
+    const minTermFreq = parseInt(envManager.get('PRF_MIN_TERM_FREQ') || DEFAULT_PRF_CONFIG.minTermFreq.toString(), 10);
+    const originalWeight = parseFloat(envManager.get('PRF_ORIGINAL_WEIGHT') || DEFAULT_PRF_CONFIG.originalWeight.toString());
+    const codeTokens = envManager.get('PRF_CODE_TOKENS')?.toLowerCase() !== 'false'; // Default true from DEFAULT_PRF_CONFIG
+    const minTermLength = parseInt(envManager.get('PRF_MIN_TERM_LENGTH') || DEFAULT_PRF_CONFIG.minTermLength.toString(), 10);
+    
+    // Use default stop words from core config, convert Set to array for serialization
+    const defaultStopWords = Array.from(DEFAULT_PRF_CONFIG.stopWords);
+    const stopWords = envManager.get('PRF_STOP_WORDS')?.split(',').map(w => w.trim()) || defaultStopWords;
+    
+    console.log(
+        `[DEBUG] 🎯 PRF configuration: PRF_ENABLED=${
+            envManager.get('PRF_ENABLED') || 'NOT SET'
+        }, enabled=${enabled}, topK=${topK}, expansionTerms=${expansionTerms}, minTermFreq=${minTermFreq}, originalWeight=${originalWeight}, codeTokens=${codeTokens}, minTermLength=${minTermLength}`
+    );
+    
+    return {
+        enabled,
+        topK,
+        expansionTerms,
+        minTermFreq,
+        originalWeight,
+        codeTokens,
+        minTermLength,
+        stopWords
+    };
+}
+
 export function createMcpConfig(): ContextMcpConfig {
     // Debug: Print all environment variables related to Context
     console.log(`[DEBUG] 🔍 Environment Variables Debug:`);
@@ -149,15 +200,24 @@ export function createMcpConfig(): ContextMcpConfig {
     console.log(`[DEBUG]   RERANKING_PROVIDER: ${envManager.get('RERANKING_PROVIDER') || 'NOT SET'}`);
     console.log(`[DEBUG]   RERANKING_MODEL: ${envManager.get('RERANKING_MODEL') || 'NOT SET'}`);
     console.log(`[DEBUG]   RERANKING_ENABLED: ${envManager.get('RERANKING_ENABLED') || 'NOT SET'}`);
+    console.log(`[DEBUG]   PRF_ENABLED: ${envManager.get('PRF_ENABLED') || 'NOT SET'}`);
+    console.log(`[DEBUG]   PRF_TOP_K: ${envManager.get('PRF_TOP_K') || 'NOT SET'}`);
+    console.log(`[DEBUG]   PRF_EXPANSION_TERMS: ${envManager.get('PRF_EXPANSION_TERMS') || 'NOT SET'}`);
+    console.log(`[DEBUG]   PRF_MIN_TERM_FREQ: ${envManager.get('PRF_MIN_TERM_FREQ') || 'NOT SET'}`);
+    console.log(`[DEBUG]   PRF_ORIGINAL_WEIGHT: ${envManager.get('PRF_ORIGINAL_WEIGHT') || 'NOT SET'}`);
+    console.log(`[DEBUG]   PRF_CODE_TOKENS: ${envManager.get('PRF_CODE_TOKENS') || 'NOT SET'}`);
+    console.log(`[DEBUG]   PRF_MIN_TERM_LENGTH: ${envManager.get('PRF_MIN_TERM_LENGTH') || 'NOT SET'}`);
+    console.log(`[DEBUG]   PRF_STOP_WORDS: ${envManager.get('PRF_STOP_WORDS') || 'NOT SET'}`);
     console.log(`[DEBUG]   MILVUS_ADDRESS: ${envManager.get('MILVUS_ADDRESS') || 'NOT SET'}`);
     console.log(`[DEBUG]   AUTO_UPDATE: ${envManager.get('AUTO_UPDATE') || 'NOT SET'}`);
     console.log(`[DEBUG]   UPDATE_CHECK_INTERVAL: ${envManager.get('UPDATE_CHECK_INTERVAL') || 'NOT SET'}`);
     console.log(`[DEBUG]   UPDATE_SOURCE: ${envManager.get('UPDATE_SOURCE') || 'NOT SET'}`);
     console.log(`[DEBUG]   NODE_ENV: ${envManager.get('NODE_ENV') || 'NOT SET'}`);
 
+    const prfConfig = getPRFConfig();
     const config: ContextMcpConfig = {
         name: envManager.get('MCP_SERVER_NAME') || "Context MCP Server",
-        version: envManager.get('MCP_SERVER_VERSION') || "1.0.0",
+        version: envManager.get('MCP_SERVER_VERSION') || VERSION,
         // Embedding provider configuration
         embeddingProvider: (envManager.get('EMBEDDING_PROVIDER') as 'OpenAI' | 'VoyageAI' | 'Gemini' | 'Ollama') || 'OpenAI',
         embeddingModel: getEmbeddingModelForProvider(envManager.get('EMBEDDING_PROVIDER') || 'OpenAI'),
@@ -175,6 +235,15 @@ export function createMcpConfig(): ContextMcpConfig {
         rerankingEnabled:
             envManager.get('RERANKING_ENABLED')?.toLowerCase() === 'true' ||
             envManager.get('RERANKING_PROVIDER') === RerankingProvider.HuggingFace,
+        // PRF configuration
+        prfEnabled: prfConfig.enabled,
+        prfTopK: prfConfig.topK,
+        prfExpansionTerms: prfConfig.expansionTerms,
+        prfMinTermFreq: prfConfig.minTermFreq,
+        prfOriginalWeight: prfConfig.originalWeight,
+        prfCodeTokens: prfConfig.codeTokens,
+        prfMinTermLength: prfConfig.minTermLength,
+        prfStopWords: prfConfig.stopWords,
         // Vector database configuration - address can be auto-resolved from token
         milvusAddress: envManager.get('MILVUS_ADDRESS'), // Optional, can be resolved from token
         milvusToken: envManager.get('MILVUS_TOKEN'),
@@ -198,6 +267,13 @@ export function logConfigurationSummary(config: ContextMcpConfig): void {
         `[MCP]   Reranking: ${
             config.rerankingEnabled
                 ? `✅ Enabled (${config.rerankingProvider}: ${config.rerankingModel})`
+                : '❌ Disabled'
+        }`
+    );
+    console.log(
+        `[MCP]   PRF: ${
+            config.prfEnabled
+                ? `✅ Enabled (topK=${config.prfTopK}, expansionTerms=${config.prfExpansionTerms}, minTermFreq=${config.prfMinTermFreq}, originalWeight=${config.prfOriginalWeight}, codeTokens=${config.prfCodeTokens}, minTermLength=${config.prfMinTermLength})`
                 : '❌ Disabled'
         }`
     );
@@ -268,6 +344,16 @@ Environment Variables:
   📦 To install reranking dependencies:
     npm install @huggingface/transformers  (or pnpm add @huggingface/transformers)
 
+  PRF (Pseudo-Relevance Feedback) Configuration:
+  PRF_ENABLED             Enable PRF query expansion: true, false (default: false)
+  PRF_TOP_K               Number of pseudo-relevant documents to analyze (default: 7, recommended: 5-10)
+  PRF_EXPANSION_TERMS     Number of expansion terms to add to query (default: 8, recommended: 5-10)
+  PRF_MIN_TERM_FREQ       Minimum term frequency threshold (default: 2)
+  PRF_ORIGINAL_WEIGHT     Original query weight in interpolation (default: 0.7, recommended: 0.6-0.8)
+  PRF_CODE_TOKENS         Enable code-aware tokenization: true, false (default: true)
+  PRF_MIN_TERM_LENGTH     Minimum term length to consider (default: 3)
+  PRF_STOP_WORDS          Custom stop words (comma-separated, optional)
+
   Vector Database Configuration:
   MILVUS_ADDRESS          Milvus address (optional, can be auto-resolved from token)
   MILVUS_TOKEN            Milvus token (optional, used for authentication and address resolution)
@@ -301,6 +387,15 @@ Examples:
 
   # Start MCP server with custom reranking model
   OPENAI_API_KEY=sk-xxx RERANKING_PROVIDER=HuggingFace RERANKING_MODEL=jinaai/jina-reranker-v2-base-multilingual MILVUS_TOKEN=your-token bunx @everwise/claude-context-mcp@latest
+
+  # Start MCP server with PRF enabled
+  OPENAI_API_KEY=sk-xxx PRF_ENABLED=true MILVUS_TOKEN=your-token bunx @everwise/claude-context-mcp@latest
+
+  # Start MCP server with custom PRF configuration
+  OPENAI_API_KEY=sk-xxx PRF_ENABLED=true PRF_TOP_K=5 PRF_EXPANSION_TERMS=10 PRF_ORIGINAL_WEIGHT=0.8 MILVUS_TOKEN=your-token bunx @everwise/claude-context-mcp@latest
+
+  # Start MCP server with both reranking and PRF enabled
+  OPENAI_API_KEY=sk-xxx RERANKING_PROVIDER=HuggingFace PRF_ENABLED=true MILVUS_TOKEN=your-token bunx @everwise/claude-context-mcp@latest
 
   # Start MCP server with auto-updates disabled
   OPENAI_API_KEY=sk-xxx AUTO_UPDATE=false MILVUS_TOKEN=your-token bunx @everwise/claude-context-mcp@latest
