@@ -17,7 +17,8 @@
         "moduleResolution": "node",
         "composite": true,
         "allowSyntheticDefaultImports": true,
-        "downlevelIteration": true
+        "downlevelIteration": true,
+        "types": ["vitest/globals"]
     },
     "include": [
         "src/**/*"

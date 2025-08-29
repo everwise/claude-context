@@ -18,7 +18,7 @@ import {
 } from './vectordb';
 import { SemanticSearchResult } from './types';
 import { BaseReranker, HuggingFaceReranker, RerankingConfig } from './reranking';
-import { SimpleQueryPreprocessor, QueryPreprocessorConfig, PreprocessingResult } from './query';
+import { SimpleQueryPreprocessor, QueryPreprocessorConfig, PreprocessingResult, PRFEngine, PRFConfig } from './query';
 import { envManager } from './utils/env-manager';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -98,6 +98,7 @@ export interface ContextConfig {
     customIgnorePatterns?: string[]; // New: custom ignore patterns from MCP
     reranking?: RerankingConfig; // New: reranking configuration
     queryPreprocessor?: QueryPreprocessorConfig; // New: query preprocessing configuration
+    prf?: PRFConfig; // New: pseudo-relevance feedback configuration
 }
 
 export class Context {
@@ -108,6 +109,7 @@ export class Context {
     private ignorePatterns: string[];
     private reranker: BaseReranker | null = null;
     private queryPreprocessor: SimpleQueryPreprocessor;
+    private prfEngine: PRFEngine | null = null;
     private synchronizers = new Map<string, FileSynchronizer>();
     private projectIgnorePatterns = new Map<string, string[]>(); // Per-project isolation
 
@@ -137,6 +139,14 @@ export class Context {
         // Initialize query preprocessor
         this.queryPreprocessor = new SimpleQueryPreprocessor(config.queryPreprocessor);
         console.log(`[Context] 🔍 Initialized query preprocessor with configuration`);
+
+        // Initialize PRF engine if configured
+        if (config.prf?.enabled) {
+            this.prfEngine = new PRFEngine(config.prf);
+            console.log(`[Context] 🚀 Initialized PRF engine: topK=${config.prf.topK}, expansionTerms=${config.prf.expansionTerms}, codeTokens=${config.prf.codeTokens}`);
+        } else {
+            console.log(`[Context] 🚫 PRF (Pseudo-Relevance Feedback) disabled`);
+        }
 
         // Load custom extensions from environment variables
         const envCustomExtensions = this.getCustomExtensionsFromEnv();
@@ -778,6 +788,133 @@ export class Context {
             console.log(`[Context] ✅ Found ${results.length} relevant results`);
             return results;
         }
+    }
+
+    /**
+     * Semantic search with Pseudo-Relevance Feedback (PRF) for enhanced query expansion
+     * 
+     * Performs two-pass retrieval:
+     * 1. Initial search with original/preprocessed query
+     * 2. PRF term extraction from top results 
+     * 3. Second search with expanded query for improved relevance
+     * 
+     * @param codebasePath Codebase path to search
+     * @param query Search query string
+     * @param topK Maximum number of results to return
+     * @param threshold Similarity threshold
+     * @param filterExpr Optional filter expression
+     * @returns Enhanced semantic search results
+     */
+    async semanticSearchWithPRF(
+        codebasePath: string, 
+        query: string, 
+        topK: number = 5, 
+        threshold: number = 0.5, 
+        filterExpr?: string
+    ): Promise<SemanticSearchResult[]> {
+        if (!this.prfEngine) {
+            console.log(`[Context] ⚠️  PRF engine not initialized, falling back to regular semantic search`);
+            return await this.semanticSearch(codebasePath, query, topK, threshold, filterExpr);
+        }
+
+        console.log(`[Context] 🚀 Executing PRF-enhanced semantic search: "${query}" in ${codebasePath}`);
+        const startTime = Date.now();
+
+        try {
+            // PASS 1: Initial retrieval for pseudo-relevant documents
+            console.log(`[Context] 📡 Pass 1: Initial retrieval for PRF analysis`);
+            const initialTopK = Math.max(this.prfEngine.getStats().totalQueries === 0 ? 15 : 12, topK * 2);
+            const pseudoRelevantResults = await this.semanticSearch(
+                codebasePath, 
+                query, 
+                initialTopK, 
+                threshold * 0.8, // Lower threshold for more candidate documents
+                filterExpr
+            );
+
+            if (pseudoRelevantResults.length === 0) {
+                console.log(`[Context] ⚠️  No pseudo-relevant documents found, returning empty results`);
+                return [];
+            }
+
+            console.log(`[Context] 📊 Found ${pseudoRelevantResults.length} pseudo-relevant documents for PRF analysis`);
+
+            // PRF: Extract expansion terms from pseudo-relevant documents
+            console.log(`[Context] 🔍 Extracting expansion terms using TF-IDF analysis...`);
+            const prfResult = await this.prfEngine.expandQuery(query, pseudoRelevantResults);
+            
+            console.log(`[Context] ✨ PRF Results: ${prfResult.reasoning}`);
+            if (prfResult.expansionTerms.length > 0) {
+                const topTerms = prfResult.expansionTerms.slice(0, 3).map(t => `${t.term}(${t.score.toFixed(2)})`);
+                console.log(`[Context] 🎯 Top expansion terms: ${topTerms.join(', ')}`);
+            }
+
+            // Check if we got meaningful expansion
+            if (prfResult.expandedQuery === prfResult.originalQuery || prfResult.expansionTerms.length === 0) {
+                console.log(`[Context] ℹ️  No meaningful query expansion, using original results`);
+                return pseudoRelevantResults.slice(0, topK);
+            }
+
+            // PASS 2: Enhanced retrieval with expanded query
+            console.log(`[Context] 🎯 Pass 2: Enhanced search with expanded query: "${prfResult.expandedQuery}"`);
+            const enhancedResults = await this.semanticSearch(
+                codebasePath,
+                prfResult.expandedQuery,
+                topK,
+                threshold,
+                filterExpr
+            );
+
+            // Merge and deduplicate results, prioritizing enhanced search results
+            const mergedResults = this.mergeSearchResults(
+                enhancedResults, 
+                pseudoRelevantResults.slice(0, topK), 
+                topK
+            );
+
+            const totalTime = Date.now() - startTime;
+            console.log(`[Context] ✅ PRF search completed in ${totalTime}ms: ${mergedResults.length} results (${prfResult.expansionTerms.length} expansion terms)`);
+
+            return mergedResults;
+
+        } catch (error) {
+            console.error(`[Context] ❌ PRF search failed:`, error);
+            console.log(`[Context] 🔄 Falling back to regular semantic search`);
+            return await this.semanticSearch(codebasePath, query, topK, threshold, filterExpr);
+        }
+    }
+
+    /**
+     * Merge and deduplicate search results from PRF passes
+     * Prioritizes enhanced results while avoiding duplicates
+     */
+    private mergeSearchResults(
+        enhancedResults: SemanticSearchResult[],
+        originalResults: SemanticSearchResult[],
+        topK: number
+    ): SemanticSearchResult[] {
+        const seen = new Set<string>();
+        const merged: SemanticSearchResult[] = [];
+
+        // Add enhanced results first (higher priority)
+        for (const result of enhancedResults) {
+            const key = `${result.relativePath}:${result.startLine}:${result.endLine}`;
+            if (!seen.has(key) && merged.length < topK) {
+                seen.add(key);
+                merged.push(result);
+            }
+        }
+
+        // Fill remaining slots with original results
+        for (const result of originalResults) {
+            const key = `${result.relativePath}:${result.startLine}:${result.endLine}`;
+            if (!seen.has(key) && merged.length < topK) {
+                seen.add(key);
+                merged.push(result);
+            }
+        }
+
+        return merged;
     }
 
     /**
