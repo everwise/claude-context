@@ -1,9 +1,9 @@
 import * as fs from "fs";
 import * as path from "path";
-import * as crypto from "crypto";
 import { Context, COLLECTION_LIMIT_MESSAGE } from "@everwise/claude-context-core";
 import { SnapshotManager } from "./snapshot.js";
 import { ensureAbsolutePath, truncateContent, trackCodebasePath, findParentIndexedProject } from "./utils.js";
+import { VERSION } from "./version.js";
 
 export class ToolHandlers {
     private context: Context;
@@ -21,9 +21,9 @@ export class ToolHandlers {
     /**
      * Resolve a codebase path, auto-detecting parent projects for subdirectories
      */
-    private resolveCodebasePath(inputPath: string, operation: string): { 
-        finalPath: string, 
-        resolutionMessage: string 
+    private resolveCodebasePath(inputPath: string, operation: string): {
+        finalPath: string,
+        resolutionMessage: string
     } {
         const absolutePath = ensureAbsolutePath(inputPath);
         const indexedCodebases = this.snapshotManager.getIndexedCodebases();
@@ -31,13 +31,13 @@ export class ToolHandlers {
         const allCodebases = [...indexedCodebases, ...indexingCodebases];
 
         const parentProject = findParentIndexedProject(absolutePath, allCodebases);
-        
+
         if (parentProject && parentProject !== absolutePath) {
             const message = `\nNote: ${operation} parent project '${parentProject}' as '${absolutePath}' is a subdirectory of this indexed project.`;
             console.log(`[${operation.toUpperCase()}] Auto-resolved subdirectory '${absolutePath}' to parent project '${parentProject}'`);
             return { finalPath: parentProject, resolutionMessage: message };
         }
-        
+
         return { finalPath: absolutePath, resolutionMessage: '' };
     }
 
@@ -46,7 +46,7 @@ export class ToolHandlers {
      * This method fetches all collections from the vector database,
      * gets the first document from each collection to extract codebasePath from metadata,
      * and updates the snapshot with discovered codebases.
-     * 
+     *
      * Logic: Compare mcp-codebase-snapshot.json with zilliz cloud collections
      * - If local snapshot has extra directories (not in cloud), remove them
      * - If local snapshot is missing directories (exist in cloud), ignore them
@@ -469,7 +469,7 @@ export class ToolHandlers {
             }
 
             // Resolve codebase path (handles subdirectory auto-detection)
-            const { finalPath: finalCodebasePath, resolutionMessage: pathResolutionMessage } = 
+            const { finalPath: finalCodebasePath, resolutionMessage: pathResolutionMessage } =
                 this.resolveCodebasePath(absolutePath, "Searching in");
 
             trackCodebasePath(finalCodebasePath);
@@ -646,7 +646,7 @@ export class ToolHandlers {
             }
 
             // Resolve codebase path (handles subdirectory auto-detection)
-            const { finalPath: finalCodebasePath, resolutionMessage: pathResolutionMessage } = 
+            const { finalPath: finalCodebasePath, resolutionMessage: pathResolutionMessage } =
                 this.resolveCodebasePath(absolutePath, "Clearing");
 
             // Check if the resolved codebase is indexed or being indexed
@@ -763,7 +763,7 @@ export class ToolHandlers {
             }
 
             // Resolve codebase path (handles subdirectory auto-detection)
-            const { finalPath: finalCodebasePath, resolutionMessage: pathResolutionMessage } = 
+            const { finalPath: finalCodebasePath, resolutionMessage: pathResolutionMessage } =
                 this.resolveCodebasePath(absolutePath, "Showing status for");
 
             // Check indexing status using new status system
@@ -824,6 +824,9 @@ export class ToolHandlers {
                     break;
             }
 
+            // Add version info to all status messages
+            statusMessage += `\n🏷️ Claude Context version: ${VERSION}`;
+
             const pathInfo = codebasePath !== absolutePath
                 ? `\nNote: Input path '${codebasePath}' was resolved to absolute path '${absolutePath}'`
                 : '';
@@ -845,4 +848,4 @@ export class ToolHandlers {
             };
         }
     }
-} 
+}
