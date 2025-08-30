@@ -168,7 +168,7 @@ export function getQueryPreprocessingConfig(): {
     enableImplementationFocus: boolean;
     maxVariants: number;
 } {
-    const enabled = envManager.get('QUERY_PREPROCESSING_ENABLED')?.toLowerCase() === 'true';
+    const enabled = envManager.get('QUERY_PREPROCESSING_ENABLED')?.toLowerCase() !== 'false';
     const enableAbbreviationExpansion = envManager.get('QUERY_PREPROCESSING_ABBREVIATION_EXPANSION')?.toLowerCase() !== 'false'; // Default true
     const enableConceptualMapping = envManager.get('QUERY_PREPROCESSING_CONCEPTUAL_MAPPING')?.toLowerCase() !== 'false'; // Default true
     const enableCaseSplitting = envManager.get('QUERY_PREPROCESSING_CASE_SPLITTING')?.toLowerCase() !== 'false'; // Default true
@@ -182,7 +182,7 @@ export function getQueryPreprocessingConfig(): {
             envManager.get('QUERY_PREPROCESSING_ENABLED') || 'NOT SET'
         }, enabled=${enabled}, maxVariants=${maxVariants}`
     );
-    
+
     return {
         enabled,
         enableAbbreviationExpansion,
@@ -206,24 +206,24 @@ export function getPRFConfig(): {
     minTermLength: number;
     stopWords: string[];
 } {
-    const enabled = envManager.get('PRF_ENABLED')?.toLowerCase() === 'true';
+    const enabled = envManager.get('PRF_ENABLED')?.toLowerCase() !== 'false';
     const topK = parseInt(envManager.get('PRF_TOP_K') || DEFAULT_PRF_CONFIG.topK.toString(), 10);
     const expansionTerms = parseInt(envManager.get('PRF_EXPANSION_TERMS') || DEFAULT_PRF_CONFIG.expansionTerms.toString(), 10);
     const minTermFreq = parseInt(envManager.get('PRF_MIN_TERM_FREQ') || DEFAULT_PRF_CONFIG.minTermFreq.toString(), 10);
     const originalWeight = parseFloat(envManager.get('PRF_ORIGINAL_WEIGHT') || DEFAULT_PRF_CONFIG.originalWeight.toString());
     const codeTokens = envManager.get('PRF_CODE_TOKENS')?.toLowerCase() !== 'false'; // Default true from DEFAULT_PRF_CONFIG
     const minTermLength = parseInt(envManager.get('PRF_MIN_TERM_LENGTH') || DEFAULT_PRF_CONFIG.minTermLength.toString(), 10);
-    
+
     // Use default stop words from core config, convert Set to array for serialization
     const defaultStopWords = Array.from(DEFAULT_PRF_CONFIG.stopWords);
     const stopWords = envManager.get('PRF_STOP_WORDS')?.split(',').map(w => w.trim()) || defaultStopWords;
-    
+
     console.log(
         `[DEBUG] 🎯 PRF configuration: PRF_ENABLED=${
             envManager.get('PRF_ENABLED') || 'NOT SET'
         }, enabled=${enabled}, topK=${topK}, expansionTerms=${expansionTerms}, minTermFreq=${minTermFreq}, originalWeight=${originalWeight}, codeTokens=${codeTokens}, minTermLength=${minTermLength}`
     );
-    
+
     return {
         enabled,
         topK,
@@ -289,7 +289,7 @@ export function createMcpConfig(): ContextMcpConfig {
         rerankingProvider: (envManager.get('RERANKING_PROVIDER') as RerankingProvider) || RerankingProvider.Disabled,
         rerankingModel: getRerankingModelForProvider((envManager.get('RERANKING_PROVIDER') as RerankingProvider) || RerankingProvider.Disabled),
         rerankingEnabled:
-            envManager.get('RERANKING_ENABLED')?.toLowerCase() === 'true' ||
+            envManager.get('RERANKING_ENABLED')?.toLowerCase() !== 'false' ||
             envManager.get('RERANKING_PROVIDER') === RerankingProvider.HuggingFace,
         // PRF configuration
         prfEnabled: prfConfig.enabled,
@@ -313,7 +313,7 @@ export function createMcpConfig(): ContextMcpConfig {
         milvusAddress: envManager.get('MILVUS_ADDRESS'), // Optional, can be resolved from token
         milvusToken: envManager.get('MILVUS_TOKEN'),
         // Auto-update configuration
-        autoUpdateEnabled: envManager.get('AUTO_UPDATE') !== 'false', // Enabled by default, opt-out
+        autoUpdateEnabled: envManager.get('AUTO_UPDATE')?.toLowerCase() !== 'false', // Enabled by default, opt-out
         autoUpdateInterval: parseInt(envManager.get('UPDATE_CHECK_INTERVAL') || '3600000', 10), // Default: 1 hour
         autoUpdateSource: (envManager.get('UPDATE_SOURCE') as 'github-packages' | 'github-releases') || 'github-packages'
     };

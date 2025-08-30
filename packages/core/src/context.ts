@@ -8,6 +8,7 @@ import {
     EmbeddingVector,
     OpenAIEmbedding
 } from './embedding';
+import { EmbeddingCache } from './cache/embedding-cache';
 import {
     VectorDatabase,
     VectorDocument,
@@ -112,6 +113,7 @@ export class Context {
     private prfEngine: PRFEngine | null = null;
     private synchronizers = new Map<string, FileSynchronizer>();
     private projectIgnorePatterns = new Map<string, string[]>(); // Per-project isolation
+    private embeddingCache: EmbeddingCache;
 
     constructor(config: ContextConfig = {}) {
         // Initialize services
@@ -181,6 +183,12 @@ export class Context {
         if (envCustomIgnorePatterns.length > 0) {
             console.log(`[Context] 🚫 Loaded ${envCustomIgnorePatterns.length} custom ignore patterns from environment: ${envCustomIgnorePatterns.join(', ')}`);
         }
+
+        this.embeddingCache = new EmbeddingCache();
+        // Initialize cache asynchronously (don't await to avoid blocking constructor)
+        this.embeddingCache.initialize().catch(error => {
+            console.warn('[Context] Failed to initialize embedding cache:', error);
+        });
     }
 
     /**
@@ -460,12 +468,12 @@ export class Context {
      */
     private selectBestSearchQuery(preprocessingResult: PreprocessingResult): string {
         const { originalQuery, expandedTerms, detectedPatterns } = preprocessingResult;
-        
+
         // Strategy 1: If we have filename patterns, prioritize variants with filenames
         const filenamePatterns = detectedPatterns.filter(p => p.startsWith('filename:'));
         if (filenamePatterns.length > 0) {
-            const filenameQuery = expandedTerms.find(term => 
-                filenamePatterns.some(pattern => 
+            const filenameQuery = expandedTerms.find(term =>
+                filenamePatterns.some(pattern =>
                     term.includes(pattern.substring(9)) // Remove 'filename:' prefix
                 )
             );
@@ -478,7 +486,7 @@ export class Context {
         // Strategy 2: If we have language patterns, prefer variants with language-specific terms
         const languagePatterns = detectedPatterns.filter(p => p.startsWith('language:'));
         if (languagePatterns.length > 0) {
-            const languageQuery = expandedTerms.find(term => 
+            const languageQuery = expandedTerms.find(term =>
                 languagePatterns.some(pattern => {
                     const lang = pattern.substring(9); // Remove 'language:' prefix
                     return term.toLowerCase().includes(lang) && term !== originalQuery;
@@ -492,8 +500,8 @@ export class Context {
 
         // Strategy 3: Look for implementation-focused variants (contain 'function', 'class', 'implementation', etc.)
         const implementationTerms = ['function', 'class', 'method', 'implementation', 'definition'];
-        const implQuery = expandedTerms.find(term => 
-            term !== originalQuery && 
+        const implQuery = expandedTerms.find(term =>
+            term !== originalQuery &&
             implementationTerms.some(implTerm => term.toLowerCase().includes(implTerm))
         );
         if (implQuery) {
@@ -502,8 +510,8 @@ export class Context {
         }
 
         // Strategy 4: Prefer expanded technical terms over abbreviations
-        const technicalQuery = expandedTerms.find(term => 
-            term !== originalQuery && 
+        const technicalQuery = expandedTerms.find(term =>
+            term !== originalQuery &&
             (term.includes('javascript') || term.includes('python') || term.includes('typescript') ||
              term.includes('authentication') || term.includes('configuration') || term.includes('database'))
         );
@@ -514,7 +522,7 @@ export class Context {
 
         // Strategy 5: Use the longest variant (likely has most context)
         if (expandedTerms.length > 1) {
-            const longestVariant = expandedTerms.reduce((longest, current) => 
+            const longestVariant = expandedTerms.reduce((longest, current) =>
                 current.length > longest.length ? current : longest
             );
             if (longestVariant !== originalQuery) {
@@ -530,7 +538,7 @@ export class Context {
 
     /**
      * Select the top N search queries based on different strategies
-     * @param preprocessingResult Result from query preprocessing  
+     * @param preprocessingResult Result from query preprocessing
      * @param maxQueries Maximum number of queries to return
      * @returns Array of the most promising query variants
      */
@@ -542,7 +550,7 @@ export class Context {
         // Priority 1: Filename-enhanced queries
         const filenamePatterns = detectedPatterns.filter(p => p.startsWith('filename:'));
         if (filenamePatterns.length > 0 && selectedQueries.length < maxQueries) {
-            const filenameQuery = expandedTerms.find(term => 
+            const filenameQuery = expandedTerms.find(term =>
                 filenamePatterns.some(pattern => term.includes(pattern.substring(9))) &&
                 !usedQueries.has(term)
             );
@@ -554,7 +562,7 @@ export class Context {
 
         // Priority 2: Technical term expansions (js->javascript, auth->authentication)
         if (selectedQueries.length < maxQueries) {
-            const technicalQuery = expandedTerms.find(term => 
+            const technicalQuery = expandedTerms.find(term =>
                 term !== originalQuery &&
                 !usedQueries.has(term) &&
                 (term.includes('javascript') || term.includes('python') || term.includes('typescript') ||
@@ -569,7 +577,7 @@ export class Context {
         // Priority 3: Implementation-focused variants
         if (selectedQueries.length < maxQueries) {
             const implementationTerms = ['function', 'class', 'method', 'implementation'];
-            const implQuery = expandedTerms.find(term => 
+            const implQuery = expandedTerms.find(term =>
                 term !== originalQuery &&
                 !usedQueries.has(term) &&
                 implementationTerms.some(implTerm => term.toLowerCase().includes(implTerm))
@@ -585,7 +593,7 @@ export class Context {
             const remainingVariants = expandedTerms
                 .filter(term => !usedQueries.has(term) && term !== originalQuery)
                 .sort((a, b) => b.length - a.length);
-            
+
             for (const variant of remainingVariants) {
                 if (selectedQueries.length >= maxQueries) break;
                 selectedQueries.push(variant);
@@ -624,7 +632,7 @@ export class Context {
 
         // Enhanced search with query variants
         const useMultipleVariants = preprocessingResult.expandedTerms.length > 2 && preprocessingResult.detectedPatterns.length > 0;
-        
+
         let searchQueries: string[];
         if (useMultipleVariants) {
             // Use top 3 most promising variants for multi-query search
@@ -634,7 +642,7 @@ export class Context {
             // Use single best query
             searchQueries = [this.selectBestSearchQuery(preprocessingResult)];
         }
-        
+
         const primarySearchQuery = searchQueries[0];
 
         const collectionName = this.getCollectionName(codebasePath);
@@ -792,12 +800,12 @@ export class Context {
 
     /**
      * Semantic search with Pseudo-Relevance Feedback (PRF) for enhanced query expansion
-     * 
+     *
      * Performs two-pass retrieval:
      * 1. Initial search with original/preprocessed query
-     * 2. PRF term extraction from top results 
+     * 2. PRF term extraction from top results
      * 3. Second search with expanded query for improved relevance
-     * 
+     *
      * @param codebasePath Codebase path to search
      * @param query Search query string
      * @param topK Maximum number of results to return
@@ -806,10 +814,10 @@ export class Context {
      * @returns Enhanced semantic search results
      */
     async semanticSearchWithPRF(
-        codebasePath: string, 
-        query: string, 
-        topK: number = 5, 
-        threshold: number = 0.5, 
+        codebasePath: string,
+        query: string,
+        topK: number = 5,
+        threshold: number = 0.5,
         filterExpr?: string
     ): Promise<SemanticSearchResult[]> {
         if (!this.prfEngine) {
@@ -825,9 +833,9 @@ export class Context {
             console.log(`[Context] 📡 Pass 1: Initial retrieval for PRF analysis`);
             const initialTopK = Math.max(this.prfEngine.getStats().totalQueries === 0 ? 15 : 12, topK * 2);
             const pseudoRelevantResults = await this.semanticSearch(
-                codebasePath, 
-                query, 
-                initialTopK, 
+                codebasePath,
+                query,
+                initialTopK,
                 threshold * 0.8, // Lower threshold for more candidate documents
                 filterExpr
             );
@@ -842,7 +850,7 @@ export class Context {
             // PRF: Extract expansion terms from pseudo-relevant documents
             console.log(`[Context] 🔍 Extracting expansion terms using TF-IDF analysis...`);
             const prfResult = await this.prfEngine.expandQuery(query, pseudoRelevantResults);
-            
+
             console.log(`[Context] ✨ PRF Results: ${prfResult.reasoning}`);
             if (prfResult.expansionTerms.length > 0) {
                 const topTerms = prfResult.expansionTerms.slice(0, 3).map(t => `${t.term}(${t.score.toFixed(2)})`);
@@ -867,8 +875,8 @@ export class Context {
 
             // Merge and deduplicate results, prioritizing enhanced search results
             const mergedResults = this.mergeSearchResults(
-                enhancedResults, 
-                pseudoRelevantResults.slice(0, topK), 
+                enhancedResults,
+                pseudoRelevantResults.slice(0, topK),
                 topK
             );
 
@@ -1209,14 +1217,74 @@ export class Context {
     }
 
     /**
+     * Get cached embeddings or generate new ones
+     * @param chunkContents Array of chunk content strings
+     * @returns Array of embedding vectors
+     */
+    private async getCachedOrGenerateEmbeddings(chunkContents: string[]): Promise<EmbeddingVector[]> {
+        if (!this.embeddingCache.isAvailable()) {
+            // Cache not available, use regular embedding generation
+            return await this.embedding.embedBatch(chunkContents);
+        }
+
+        // Generate content hashes for all chunks
+        const contentHashes = chunkContents.map(content => EmbeddingCache.getContentHash(content));
+
+        // Check cache for existing embeddings
+        const cachedEmbeddings = this.embeddingCache.getMany(contentHashes);
+
+        const results: EmbeddingVector[] = [];
+        const uncachedContents: string[] = [];
+        const uncachedIndices: number[] = [];
+
+        // Separate cached from uncached chunks
+        for (let i = 0; i < chunkContents.length; i++) {
+            const hash = contentHashes[i];
+            const cached = cachedEmbeddings.get(hash);
+
+            if (cached) {
+                results[i] = { vector: cached, dimension: cached.length };
+            } else {
+                uncachedContents.push(chunkContents[i]);
+                uncachedIndices.push(i);
+            }
+        }
+
+        // Generate embeddings for uncached chunks
+        if (uncachedContents.length > 0) {
+            console.log(`[Context] 🔄 Cache miss for ${uncachedContents.length}/${chunkContents.length} chunks, generating embeddings...`);
+            const newEmbeddings = await this.embedding.embedBatch(uncachedContents);
+
+            // Store new embeddings in cache
+            const embeddingsToCache = new Map<string, number[]>();
+            for (let i = 0; i < uncachedContents.length; i++) {
+                const originalIndex = uncachedIndices[i];
+                const embedding = newEmbeddings[i];
+                results[originalIndex] = embedding;
+
+                // Add to cache
+                const hash = EmbeddingCache.getContentHash(uncachedContents[i]);
+                embeddingsToCache.set(hash, embedding.vector);
+            }
+
+            // Batch store to cache
+            this.embeddingCache.setMany(embeddingsToCache);
+        } else {
+            console.log(`[Context] ✅ Cache hit for all ${chunkContents.length} chunks`);
+        }
+
+        return results;
+    }
+
+    /**
      * Process a batch of chunks
      */
     private async processChunkBatch(chunks: CodeChunk[], codebasePath: string): Promise<void> {
         const isHybrid = this.getIsHybrid();
 
-        // Generate embedding vectors
+        // Generate embedding vectors using cache-aware logic
         const chunkContents = chunks.map(chunk => chunk.content);
-        const embeddings = await this.embedding.embedBatch(chunkContents);
+        const embeddings = await this.getCachedOrGenerateEmbeddings(chunkContents);
 
         if (isHybrid === true) {
             // Create hybrid vector documents
