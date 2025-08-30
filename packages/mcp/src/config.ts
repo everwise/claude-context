@@ -28,6 +28,15 @@ export interface ContextMcpConfig {
     prfCodeTokens: boolean;
     prfMinTermLength: number;
     prfStopWords: string[];
+    // Query preprocessing configuration
+    queryPreprocessingEnabled: boolean;
+    queryPreprocessingAbbreviationExpansion: boolean;
+    queryPreprocessingConceptualMapping: boolean;
+    queryPreprocessingCaseSplitting: boolean;
+    queryPreprocessingFilenameDetection: boolean;
+    queryPreprocessingLanguageDetection: boolean;
+    queryPreprocessingImplementationFocus: boolean;
+    queryPreprocessingMaxVariants: number;
     // Vector database configuration
     milvusAddress?: string; // Optional, can be auto-resolved from token
     milvusToken?: string;
@@ -148,6 +157,44 @@ export function getRerankingModelForProvider(provider: RerankingProvider): strin
     }
 }
 
+// Helper function to get query preprocessing configuration with environment variable priority
+export function getQueryPreprocessingConfig(): {
+    enabled: boolean;
+    enableAbbreviationExpansion: boolean;
+    enableConceptualMapping: boolean;
+    enableCaseSplitting: boolean;
+    enableFilenameDetection: boolean;
+    enableLanguageDetection: boolean;
+    enableImplementationFocus: boolean;
+    maxVariants: number;
+} {
+    const enabled = envManager.get('QUERY_PREPROCESSING_ENABLED')?.toLowerCase() === 'true';
+    const enableAbbreviationExpansion = envManager.get('QUERY_PREPROCESSING_ABBREVIATION_EXPANSION')?.toLowerCase() !== 'false'; // Default true
+    const enableConceptualMapping = envManager.get('QUERY_PREPROCESSING_CONCEPTUAL_MAPPING')?.toLowerCase() !== 'false'; // Default true
+    const enableCaseSplitting = envManager.get('QUERY_PREPROCESSING_CASE_SPLITTING')?.toLowerCase() !== 'false'; // Default true
+    const enableFilenameDetection = envManager.get('QUERY_PREPROCESSING_FILENAME_DETECTION')?.toLowerCase() !== 'false'; // Default true
+    const enableLanguageDetection = envManager.get('QUERY_PREPROCESSING_LANGUAGE_DETECTION')?.toLowerCase() !== 'false'; // Default true
+    const enableImplementationFocus = envManager.get('QUERY_PREPROCESSING_IMPLEMENTATION_FOCUS')?.toLowerCase() !== 'false'; // Default true
+    const maxVariants = parseInt(envManager.get('QUERY_PREPROCESSING_MAX_VARIANTS') || '15', 10);
+
+    console.log(
+        `[DEBUG] 🎯 Query preprocessing configuration: QUERY_PREPROCESSING_ENABLED=${
+            envManager.get('QUERY_PREPROCESSING_ENABLED') || 'NOT SET'
+        }, enabled=${enabled}, maxVariants=${maxVariants}`
+    );
+    
+    return {
+        enabled,
+        enableAbbreviationExpansion,
+        enableConceptualMapping,
+        enableCaseSplitting,
+        enableFilenameDetection,
+        enableLanguageDetection,
+        enableImplementationFocus,
+        maxVariants
+    };
+}
+
 // Helper function to get PRF configuration with environment variable priority
 export function getPRFConfig(): {
     enabled: boolean;
@@ -208,6 +255,14 @@ export function createMcpConfig(): ContextMcpConfig {
     console.log(`[DEBUG]   PRF_CODE_TOKENS: ${envManager.get('PRF_CODE_TOKENS') || 'NOT SET'}`);
     console.log(`[DEBUG]   PRF_MIN_TERM_LENGTH: ${envManager.get('PRF_MIN_TERM_LENGTH') || 'NOT SET'}`);
     console.log(`[DEBUG]   PRF_STOP_WORDS: ${envManager.get('PRF_STOP_WORDS') || 'NOT SET'}`);
+    console.log(`[DEBUG]   QUERY_PREPROCESSING_ENABLED: ${envManager.get('QUERY_PREPROCESSING_ENABLED') || 'NOT SET'}`);
+    console.log(`[DEBUG]   QUERY_PREPROCESSING_ABBREVIATION_EXPANSION: ${envManager.get('QUERY_PREPROCESSING_ABBREVIATION_EXPANSION') || 'NOT SET'}`);
+    console.log(`[DEBUG]   QUERY_PREPROCESSING_CONCEPTUAL_MAPPING: ${envManager.get('QUERY_PREPROCESSING_CONCEPTUAL_MAPPING') || 'NOT SET'}`);
+    console.log(`[DEBUG]   QUERY_PREPROCESSING_CASE_SPLITTING: ${envManager.get('QUERY_PREPROCESSING_CASE_SPLITTING') || 'NOT SET'}`);
+    console.log(`[DEBUG]   QUERY_PREPROCESSING_FILENAME_DETECTION: ${envManager.get('QUERY_PREPROCESSING_FILENAME_DETECTION') || 'NOT SET'}`);
+    console.log(`[DEBUG]   QUERY_PREPROCESSING_LANGUAGE_DETECTION: ${envManager.get('QUERY_PREPROCESSING_LANGUAGE_DETECTION') || 'NOT SET'}`);
+    console.log(`[DEBUG]   QUERY_PREPROCESSING_IMPLEMENTATION_FOCUS: ${envManager.get('QUERY_PREPROCESSING_IMPLEMENTATION_FOCUS') || 'NOT SET'}`);
+    console.log(`[DEBUG]   QUERY_PREPROCESSING_MAX_VARIANTS: ${envManager.get('QUERY_PREPROCESSING_MAX_VARIANTS') || 'NOT SET'}`);
     console.log(`[DEBUG]   MILVUS_ADDRESS: ${envManager.get('MILVUS_ADDRESS') || 'NOT SET'}`);
     console.log(`[DEBUG]   AUTO_UPDATE: ${envManager.get('AUTO_UPDATE') || 'NOT SET'}`);
     console.log(`[DEBUG]   UPDATE_CHECK_INTERVAL: ${envManager.get('UPDATE_CHECK_INTERVAL') || 'NOT SET'}`);
@@ -215,6 +270,7 @@ export function createMcpConfig(): ContextMcpConfig {
     console.log(`[DEBUG]   NODE_ENV: ${envManager.get('NODE_ENV') || 'NOT SET'}`);
 
     const prfConfig = getPRFConfig();
+    const queryPreprocessingConfig = getQueryPreprocessingConfig();
     const config: ContextMcpConfig = {
         name: envManager.get('MCP_SERVER_NAME') || "Context MCP Server",
         version: envManager.get('MCP_SERVER_VERSION') || VERSION,
@@ -244,6 +300,15 @@ export function createMcpConfig(): ContextMcpConfig {
         prfCodeTokens: prfConfig.codeTokens,
         prfMinTermLength: prfConfig.minTermLength,
         prfStopWords: prfConfig.stopWords,
+        // Query preprocessing configuration
+        queryPreprocessingEnabled: queryPreprocessingConfig.enabled,
+        queryPreprocessingAbbreviationExpansion: queryPreprocessingConfig.enableAbbreviationExpansion,
+        queryPreprocessingConceptualMapping: queryPreprocessingConfig.enableConceptualMapping,
+        queryPreprocessingCaseSplitting: queryPreprocessingConfig.enableCaseSplitting,
+        queryPreprocessingFilenameDetection: queryPreprocessingConfig.enableFilenameDetection,
+        queryPreprocessingLanguageDetection: queryPreprocessingConfig.enableLanguageDetection,
+        queryPreprocessingImplementationFocus: queryPreprocessingConfig.enableImplementationFocus,
+        queryPreprocessingMaxVariants: queryPreprocessingConfig.maxVariants,
         // Vector database configuration - address can be auto-resolved from token
         milvusAddress: envManager.get('MILVUS_ADDRESS'), // Optional, can be resolved from token
         milvusToken: envManager.get('MILVUS_TOKEN'),
@@ -274,6 +339,13 @@ export function logConfigurationSummary(config: ContextMcpConfig): void {
         `[MCP]   PRF: ${
             config.prfEnabled
                 ? `✅ Enabled (topK=${config.prfTopK}, expansionTerms=${config.prfExpansionTerms}, minTermFreq=${config.prfMinTermFreq}, originalWeight=${config.prfOriginalWeight}, codeTokens=${config.prfCodeTokens}, minTermLength=${config.prfMinTermLength})`
+                : '❌ Disabled'
+        }`
+    );
+    console.log(
+        `[MCP]   Query Preprocessing: ${
+            config.queryPreprocessingEnabled
+                ? `✅ Enabled (maxVariants=${config.queryPreprocessingMaxVariants}, abbreviationExpansion=${config.queryPreprocessingAbbreviationExpansion}, conceptualMapping=${config.queryPreprocessingConceptualMapping}, caseSplitting=${config.queryPreprocessingCaseSplitting})`
                 : '❌ Disabled'
         }`
     );
@@ -354,6 +426,16 @@ Environment Variables:
   PRF_MIN_TERM_LENGTH     Minimum term length to consider (default: 3)
   PRF_STOP_WORDS          Custom stop words (comma-separated, optional)
 
+  Query Preprocessing Configuration:
+  QUERY_PREPROCESSING_ENABLED                    Enable query preprocessing for enhanced search terms: true, false (default: false)
+  QUERY_PREPROCESSING_ABBREVIATION_EXPANSION     Enable abbreviation expansion (js -> javascript): true, false (default: true)
+  QUERY_PREPROCESSING_CONCEPTUAL_MAPPING         Enable conceptual mapping (error handling -> try catch): true, false (default: true)
+  QUERY_PREPROCESSING_CASE_SPLITTING             Enable case splitting (camelCase -> camel Case): true, false (default: true)
+  QUERY_PREPROCESSING_FILENAME_DETECTION         Enable filename detection and enhancement: true, false (default: true)
+  QUERY_PREPROCESSING_LANGUAGE_DETECTION         Enable programming language detection: true, false (default: true)
+  QUERY_PREPROCESSING_IMPLEMENTATION_FOCUS       Enable implementation-focused query variants: true, false (default: true)
+  QUERY_PREPROCESSING_MAX_VARIANTS               Maximum number of query variants to generate (default: 15)
+
   Vector Database Configuration:
   MILVUS_ADDRESS          Milvus address (optional, can be auto-resolved from token)
   MILVUS_TOKEN            Milvus token (optional, used for authentication and address resolution)
@@ -396,6 +478,15 @@ Examples:
 
   # Start MCP server with both reranking and PRF enabled
   OPENAI_API_KEY=sk-xxx RERANKING_PROVIDER=HuggingFace PRF_ENABLED=true MILVUS_TOKEN=your-token bunx @everwise/claude-context-mcp@latest
+
+  # Start MCP server with query preprocessing enabled
+  OPENAI_API_KEY=sk-xxx QUERY_PREPROCESSING_ENABLED=true MILVUS_TOKEN=your-token bunx @everwise/claude-context-mcp@latest
+
+  # Start MCP server with custom query preprocessing configuration
+  OPENAI_API_KEY=sk-xxx QUERY_PREPROCESSING_ENABLED=true QUERY_PREPROCESSING_MAX_VARIANTS=20 QUERY_PREPROCESSING_ABBREVIATION_EXPANSION=true MILVUS_TOKEN=your-token bunx @everwise/claude-context-mcp@latest
+
+  # Start MCP server with all advanced features enabled
+  OPENAI_API_KEY=sk-xxx RERANKING_PROVIDER=HuggingFace PRF_ENABLED=true QUERY_PREPROCESSING_ENABLED=true MILVUS_TOKEN=your-token bunx @everwise/claude-context-mcp@latest
 
   # Start MCP server with auto-updates disabled
   OPENAI_API_KEY=sk-xxx AUTO_UPDATE=false MILVUS_TOKEN=your-token bunx @everwise/claude-context-mcp@latest

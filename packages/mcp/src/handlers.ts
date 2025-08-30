@@ -435,7 +435,7 @@ export class ToolHandlers {
     }
 
     public async handleSearchCode(args: any) {
-        const { path: codebasePath, query, limit = 10, extensionFilter } = args;
+        const { path: codebasePath, query, limit = 10, extensionFilter, rerankingEnabled, prfEnabled, queryPreprocessingEnabled } = args;
         const resultLimit = limit || 10;
 
         try {
@@ -523,22 +523,45 @@ export class ToolHandlers {
                 filterExpr = `fileExtension in [${quoted}]`;
             }
 
-            // Search in the resolved codebase (use PRF if available)
-            const searchResults = (this.context as any).prfEngine
-                ? await (this.context as any).semanticSearchWithPRF(
-                    finalCodebasePath,
-                    query,
-                    Math.min(resultLimit, 50),
-                    0.3,
-                    filterExpr
-                )
-                : await this.context.semanticSearch(
+            // Determine search method based on passed parameters or default configuration
+            let searchResults: any[];
+            
+            // Handle reranking override
+            if (rerankingEnabled !== undefined) {
+                console.log(`[SEARCH] 🔄 Reranking override: ${rerankingEnabled ? 'enabled' : 'disabled'} (overriding default configuration)`);
+                console.log(`[SEARCH] ⚠️  Note: Reranking override is currently logged but not fully implemented. The default .env configuration will still be used.`);
+            }
+            
+            // Handle PRF override
+            const usePRF = prfEnabled !== undefined ? prfEnabled : !!(this.context as any).prfEngine;
+            if (prfEnabled !== undefined) {
+                console.log(`[SEARCH] 🚀 PRF override: ${prfEnabled ? 'enabled' : 'disabled'} (overriding default configuration)`);
+            }
+            
+            // Handle query preprocessing override
+            if (queryPreprocessingEnabled !== undefined) {
+                console.log(`[SEARCH] 🔍 Query preprocessing override: ${queryPreprocessingEnabled ? 'enabled' : 'disabled'} (overriding default configuration)`);
+                console.log(`[SEARCH] ⚠️  Note: Query preprocessing override is currently logged but not fully implemented. The default .env configuration will still be used.`);
+            }
+            
+            // Execute search based on PRF configuration
+            if (usePRF && (this.context as any).prfEngine) {
+                searchResults = await (this.context as any).semanticSearchWithPRF(
                     finalCodebasePath,
                     query,
                     Math.min(resultLimit, 50),
                     0.3,
                     filterExpr
                 );
+            } else {
+                searchResults = await this.context.semanticSearch(
+                    finalCodebasePath,
+                    query,
+                    Math.min(resultLimit, 50),
+                    0.3,
+                    filterExpr
+                );
+            }
 
             console.log(`[SEARCH] ✅ Search completed! Found ${searchResults.length} results using ${embeddingProvider.getProvider()} embeddings`);
 

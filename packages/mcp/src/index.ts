@@ -2,9 +2,6 @@
 
 // CRITICAL: Redirect console outputs to stderr IMMEDIATELY to avoid interfering with MCP JSON protocol
 // Only MCP protocol messages should go to stdout
-const originalConsoleLog = console.log;
-const originalConsoleWarn = console.warn;
-
 console.log = (...args: any[]) => {
     process.stderr.write('[LOG] ' + args.join(' ') + '\n');
 };
@@ -65,7 +62,7 @@ class ContextMcpServer {
             ...(config.milvusToken && { token: config.milvusToken })
         });
 
-        // Initialize Claude Context with reranking and PRF configuration
+        // Initialize Claude Context with reranking, PRF, and query preprocessing configuration
         this.context = new Context({
             embedding,
             vectorDatabase,
@@ -85,6 +82,17 @@ class ContextMcpServer {
                     codeTokens: config.prfCodeTokens,
                     minTermLength: config.prfMinTermLength,
                     stopWords: new Set(config.prfStopWords)
+                }
+            }),
+            ...(config.queryPreprocessingEnabled && {
+                queryPreprocessor: {
+                    enableAbbreviationExpansion: config.queryPreprocessingAbbreviationExpansion,
+                    enableConceptualMapping: config.queryPreprocessingConceptualMapping,
+                    enableCaseSplitting: config.queryPreprocessingCaseSplitting,
+                    enableFilenameDetection: config.queryPreprocessingFilenameDetection,
+                    enableLanguageDetection: config.queryPreprocessingLanguageDetection,
+                    enableImplementationFocus: config.queryPreprocessingImplementationFocus,
+                    maxVariants: config.queryPreprocessingMaxVariants
                 }
             })
         });
@@ -206,6 +214,21 @@ This tool is versatile and can be used before completing various tasks to retrie
                                     },
                                     description: "Optional: List of file extensions to filter results. (e.g., ['.ts','.py']).",
                                     default: []
+                                },
+                                rerankingEnabled: {
+                                    type: "boolean",
+                                    description: "Optional: Enable result reranking. Only specify if you want to override the default .env configuration.",
+                                    default: undefined
+                                },
+                                prfEnabled: {
+                                    type: "boolean",
+                                    description: "Optional: Enable Pseudo-Relevance Feedback for query expansion. Only specify if you want to override the default .env configuration.",
+                                    default: undefined
+                                },
+                                queryPreprocessingEnabled: {
+                                    type: "boolean",
+                                    description: "Optional: Enable query preprocessing for enhanced search terms. Only specify if you want to override the default .env configuration.",
+                                    default: undefined
                                 }
                             },
                             required: ["path", "query"]
