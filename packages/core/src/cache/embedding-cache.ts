@@ -3,6 +3,7 @@ import * as crypto from 'crypto';
 import * as fs from 'fs-extra';
 import * as os from 'os';
 import * as path from 'path';
+import { envManager } from '../utils/env-manager';
 
 export interface CachedEmbedding {
     contentHash: string;
@@ -25,6 +26,13 @@ export class EmbeddingCache {
     private db: DatabaseType | null = null;
     private cachePath: string;
     private initialized = false;
+    private cleanupInterval?: NodeJS.Timeout;
+
+    // Configuration constants with defaults
+    private readonly DEFAULT_MAX_AGE_DAYS = 7;
+    private readonly DEFAULT_MAX_SIZE_MB = 500;
+    private readonly DEFAULT_CLEANUP_INTERVAL_HOURS = 24;
+    private readonly DEFAULT_CLEANUP_ENABLED = true;
 
     constructor() {
         this.cachePath = this.getCachePath();
@@ -80,6 +88,12 @@ export class EmbeddingCache {
 
             this.initialized = true;
             console.log(`[EmbeddingCache] Initialized cache at ${this.cachePath}`);
+
+            // Start automatic cleanup if enabled
+            this.startPeriodicCleanup();
+            
+            // Run initial cleanup on startup
+            this.smartCleanup();
         } catch (error) {
             console.error('[EmbeddingCache] Failed to initialize:', error);
             // Don't throw - system should work without cache
@@ -233,6 +247,103 @@ export class EmbeddingCache {
     }
 
     /**
+     * Start periodic cleanup based on configuration
+     */
+    private startPeriodicCleanup(): void {
+        const enabled = envManager.get('CACHE_CLEANUP_ENABLED')?.toLowerCase() !== 'false';
+        if (!enabled) {
+            console.log('[EmbeddingCache] Automatic cleanup disabled via CACHE_CLEANUP_ENABLED');
+            return;
+        }
+
+        const intervalHours = parseInt(envManager.get('CACHE_CLEANUP_INTERVAL_HOURS') || String(this.DEFAULT_CLEANUP_INTERVAL_HOURS)) || this.DEFAULT_CLEANUP_INTERVAL_HOURS;
+        const intervalMs = intervalHours * 60 * 60 * 1000;
+
+        this.cleanupInterval = setInterval(() => {
+            try {
+                console.log('[EmbeddingCache] Running scheduled cleanup...');
+                this.smartCleanup();
+            } catch (error) {
+                console.error('[EmbeddingCache] Scheduled cleanup failed:', error);
+            }
+        }, intervalMs);
+
+        console.log(`[EmbeddingCache] Started periodic cleanup every ${intervalHours} hours`);
+    }
+
+    /**
+     * Stop periodic cleanup
+     */
+    private stopPeriodicCleanup(): void {
+        if (this.cleanupInterval) {
+            clearInterval(this.cleanupInterval);
+            this.cleanupInterval = undefined;
+            console.log('[EmbeddingCache] Stopped periodic cleanup');
+        }
+    }
+
+    /**
+     * Smart cleanup using both time and size constraints
+     */
+    private smartCleanup(): number {
+        let totalRemoved = 0;
+        
+        // Get configuration
+        const maxAgeDays = parseInt(envManager.get('CACHE_MAX_AGE_DAYS') || String(this.DEFAULT_MAX_AGE_DAYS)) || this.DEFAULT_MAX_AGE_DAYS;
+        const maxSizeMB = parseInt(envManager.get('CACHE_MAX_SIZE_MB') || String(this.DEFAULT_MAX_SIZE_MB)) || this.DEFAULT_MAX_SIZE_MB;
+        
+        // First: Remove old entries
+        const maxAgeMs = maxAgeDays * 24 * 60 * 60 * 1000;
+        totalRemoved += this.cleanup(maxAgeMs);
+        
+        // Then: Check size constraints
+        totalRemoved += this.cleanupBySize(maxSizeMB);
+        
+        if (totalRemoved > 0) {
+            console.log(`[EmbeddingCache] Smart cleanup completed - removed ${totalRemoved} entries`);
+        }
+        
+        return totalRemoved;
+    }
+
+    /**
+     * Remove entries when cache exceeds size limit
+     */
+    private cleanupBySize(maxSizeMB: number): number {
+        if (!this.db || !this.initialized) return 0;
+
+        try {
+            const stats = this.getStats();
+            if (!stats) return 0;
+
+            const maxSizeBytes = maxSizeMB * 1024 * 1024;
+            if (stats.cacheSize <= maxSizeBytes) return 0;
+
+            // Remove oldest 10% of entries to get under the size limit
+            const targetRemoval = Math.ceil(stats.totalEntries * 0.1);
+            const stmt = this.db.prepare(`
+                DELETE FROM embeddings 
+                WHERE content_hash IN (
+                    SELECT content_hash FROM embeddings 
+                    ORDER BY created_at ASC 
+                    LIMIT ?
+                )
+            `);
+            
+            const result = stmt.run(targetRemoval);
+            
+            if (result.changes > 0) {
+                console.log(`[EmbeddingCache] Size cleanup removed ${result.changes} oldest entries`);
+            }
+            
+            return result.changes;
+        } catch (error) {
+            console.error('[EmbeddingCache] Error during size cleanup:', error);
+            return 0;
+        }
+    }
+
+    /**
      * Clean up old cache entries
      */
     public cleanup(maxAgeMs: number = 30 * 24 * 60 * 60 * 1000): number {
@@ -258,6 +369,9 @@ export class EmbeddingCache {
      * Close the database connection
      */
     public close(): void {
+        // Stop periodic cleanup first
+        this.stopPeriodicCleanup();
+        
         if (this.db) {
             try {
                 this.db.close();
