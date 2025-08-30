@@ -27,7 +27,9 @@ const LANGUAGE_PARSERS = {
     cpp: 'tree-sitter-cpp.wasm',
     go: 'tree-sitter-go.wasm',
     rust: 'tree-sitter-rust.wasm',
-    csharp: 'tree-sitter-c_sharp.wasm'
+    csharp: 'tree-sitter-c_sharp.wasm',
+    ruby: 'tree-sitter-ruby.wasm',
+    scala: 'tree-sitter-scala.wasm'
 };
 
 // Node types that represent logical code units
