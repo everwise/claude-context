@@ -1282,70 +1282,83 @@ export class Context {
     private async processChunkBatch(chunks: CodeChunk[], codebasePath: string): Promise<void> {
         const isHybrid = this.getIsHybrid();
 
-        // Generate embedding vectors using cache-aware logic
-        const chunkContents = chunks.map(chunk => chunk.content);
-        const embeddings = await this.getCachedOrGenerateEmbeddings(chunkContents);
+        try {
+            console.log(`[DEBUG-PROCESS] Starting processChunkBatch with ${chunks.length} chunks, isHybrid=${isHybrid}`);
 
-        if (isHybrid === true) {
-            // Create hybrid vector documents
-            const documents: VectorDocument[] = chunks.map((chunk, index) => {
-                if (!chunk.metadata.filePath) {
-                    throw new Error(`Missing filePath in chunk metadata at index ${index}`);
-                }
+            // Generate embedding vectors using cache-aware logic
+            const chunkContents = chunks.map(chunk => chunk.content);
+            const embeddings = await this.getCachedOrGenerateEmbeddings(chunkContents);
 
-                const relativePath = path.relative(codebasePath, chunk.metadata.filePath);
-                const fileExtension = path.extname(chunk.metadata.filePath);
-                const { filePath, startLine, endLine, ...restMetadata } = chunk.metadata;
+            console.log(`[DEBUG-PROCESS] Retrieved ${embeddings.length} embeddings`);
 
-                return {
-                    id: this.generateId(relativePath, chunk.metadata.startLine || 0, chunk.metadata.endLine || 0, chunk.content),
-                    content: chunk.content, // Full text content for BM25 and storage
-                    vector: embeddings[index].vector, // Dense vector
-                    relativePath,
-                    startLine: chunk.metadata.startLine || 0,
-                    endLine: chunk.metadata.endLine || 0,
-                    fileExtension,
-                    metadata: {
-                        ...restMetadata,
-                        codebasePath,
-                        language: chunk.metadata.language || 'unknown',
-                        chunkIndex: index
+            if (isHybrid === true) {
+                console.log(`[DEBUG-PROCESS] Creating hybrid documents for ${chunks.length} chunks with ${embeddings.length} embeddings`);
+
+                // Create hybrid vector documents
+                const documents: VectorDocument[] = chunks.map((chunk, index) => {
+                    if (!chunk.metadata.filePath) {
+                        throw new Error(`Missing filePath in chunk metadata at index ${index}`);
                     }
-                };
-            });
 
-            // Store to vector database
-            await this.vectorDatabase.insertHybrid(this.getCollectionName(codebasePath), documents);
-        } else {
-            // Create regular vector documents
-            const documents: VectorDocument[] = chunks.map((chunk, index) => {
-                if (!chunk.metadata.filePath) {
-                    throw new Error(`Missing filePath in chunk metadata at index ${index}`);
-                }
+                    const relativePath = path.relative(codebasePath, chunk.metadata.filePath);
+                    const fileExtension = path.extname(chunk.metadata.filePath);
+                    const { filePath, startLine, endLine, ...restMetadata } = chunk.metadata;
 
-                const relativePath = path.relative(codebasePath, chunk.metadata.filePath);
-                const fileExtension = path.extname(chunk.metadata.filePath);
-                const { filePath, startLine, endLine, ...restMetadata } = chunk.metadata;
+                    return {
+                        id: this.generateId(relativePath, chunk.metadata.startLine || 0, chunk.metadata.endLine || 0, chunk.content),
+                        content: chunk.content, // Full text content for BM25 and storage
+                        vector: embeddings[index].vector, // Dense vector
+                        relativePath,
+                        startLine: chunk.metadata.startLine || 0,
+                        endLine: chunk.metadata.endLine || 0,
+                        fileExtension,
+                        metadata: {
+                            ...restMetadata,
+                            codebasePath,
+                            language: chunk.metadata.language || 'unknown',
+                            chunkIndex: index
+                        }
+                    };
+                });
 
-                return {
-                    id: this.generateId(relativePath, chunk.metadata.startLine || 0, chunk.metadata.endLine || 0, chunk.content),
-                    vector: embeddings[index].vector,
-                    content: chunk.content,
-                    relativePath,
-                    startLine: chunk.metadata.startLine || 0,
-                    endLine: chunk.metadata.endLine || 0,
-                    fileExtension,
-                    metadata: {
-                        ...restMetadata,
-                        codebasePath,
-                        language: chunk.metadata.language || 'unknown',
-                        chunkIndex: index
+                // Store to vector database
+                console.log(`[DEBUG-PROCESS] About to call insertHybrid with collection: ${this.getCollectionName(codebasePath)}`);
+                await this.vectorDatabase.insertHybrid(this.getCollectionName(codebasePath), documents);
+                console.log(`[DEBUG-PROCESS] insertHybrid completed successfully`);
+            } else {
+                // Create regular vector documents
+                const documents: VectorDocument[] = chunks.map((chunk, index) => {
+                    if (!chunk.metadata.filePath) {
+                        throw new Error(`Missing filePath in chunk metadata at index ${index}`);
                     }
-                };
-            });
 
-            // Store to vector database
-            await this.vectorDatabase.insert(this.getCollectionName(codebasePath), documents);
+                    const relativePath = path.relative(codebasePath, chunk.metadata.filePath);
+                    const fileExtension = path.extname(chunk.metadata.filePath);
+                    const { filePath, startLine, endLine, ...restMetadata } = chunk.metadata;
+
+                    return {
+                        id: this.generateId(relativePath, chunk.metadata.startLine || 0, chunk.metadata.endLine || 0, chunk.content),
+                        vector: embeddings[index].vector,
+                        content: chunk.content,
+                        relativePath,
+                        startLine: chunk.metadata.startLine || 0,
+                        endLine: chunk.metadata.endLine || 0,
+                        fileExtension,
+                        metadata: {
+                            ...restMetadata,
+                            codebasePath,
+                            language: chunk.metadata.language || 'unknown',
+                            chunkIndex: index
+                        }
+                    };
+                });
+
+                // Store to vector database
+                await this.vectorDatabase.insert(this.getCollectionName(codebasePath), documents);
+            }
+        } catch (error) {
+            console.error(`[DEBUG-PROCESS] Error in processChunkBatch:`, error);
+            throw error; // Re-throw to maintain existing error handling
         }
     }
 

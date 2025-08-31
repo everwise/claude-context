@@ -2,15 +2,19 @@
 
 // CRITICAL: Redirect console outputs to stderr IMMEDIATELY to avoid interfering with MCP JSON protocol
 // Only MCP protocol messages should go to stdout
+import { logJson } from "@everwise/claude-context-core";
+
 console.log = (...args: any[]) => {
-    process.stderr.write('[LOG] ' + args.join(' ') + '\n');
+    logJson('info', args.join(' '));
 };
 
 console.warn = (...args: any[]) => {
-    process.stderr.write('[WARN] ' + args.join(' ') + '\n');
+    logJson('warn', args.join(' '));
 };
 
-// console.error already goes to stderr by default
+console.error = (...args: any[]) => {
+    logJson('error', args.join(' '));
+};
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";

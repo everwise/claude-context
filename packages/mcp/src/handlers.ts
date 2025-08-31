@@ -1,9 +1,8 @@
 import * as fs from "fs";
 import * as path from "path";
-import { Context, COLLECTION_LIMIT_MESSAGE } from "@everwise/claude-context-core";
+import { Context, COLLECTION_LIMIT_MESSAGE, VERSION } from "@everwise/claude-context-core";
 import { SnapshotManager } from "./snapshot.js";
 import { ensureAbsolutePath, truncateContent, trackCodebasePath, findParentIndexedProject } from "./utils.js";
-import { VERSION } from "./version.js";
 
 export class ToolHandlers {
     private context: Context;

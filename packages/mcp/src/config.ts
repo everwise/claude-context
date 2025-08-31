@@ -1,5 +1,4 @@
-import { envManager, RerankingProvider, DEFAULT_PRF_CONFIG } from '@everwise/claude-context-core';
-import { VERSION } from './version.js';
+import { envManager, RerankingProvider, DEFAULT_PRF_CONFIG, VERSION } from '@everwise/claude-context-core';
 
 export interface ContextMcpConfig {
     name: string;
