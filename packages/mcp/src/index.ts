@@ -22,12 +22,13 @@ import {
     ListToolsRequestSchema,
     CallToolRequestSchema
 } from "@modelcontextprotocol/sdk/types.js";
-import { Context } from "@everwise/claude-context-core";
+import { Context, AstCodeSplitter, LangChainCodeSplitter } from "@everwise/claude-context-core";
 import { MilvusVectorDatabase } from "@everwise/claude-context-core";
 
 // Import our modular components
 import { createMcpConfig, logConfigurationSummary, showHelpMessage, ContextMcpConfig } from "./config.js";
 import { createEmbeddingInstance, logEmbeddingProviderInfo } from "./embedding.js";
+import { logSplitterInfo } from "./splitter.js";
 import { SnapshotManager } from "./snapshot.js";
 import { SyncManager } from "./sync.js";
 import { ToolHandlers } from "./handlers.js";
@@ -66,10 +67,18 @@ class ContextMcpServer {
             ...(config.milvusToken && { token: config.milvusToken })
         });
 
+        // Create splitter instance with configuration
+        const codeSplitter = new AstCodeSplitter(
+            config.splitterChunkSize,
+            config.splitterChunkOverlap
+        );
+        console.log(`[SPLITTER] Initialized AST splitter with chunkSize=${config.splitterChunkSize}, chunkOverlap=${config.splitterChunkOverlap}`);
+
         // Initialize Claude Context with reranking, PRF, and query preprocessing configuration
         this.context = new Context({
             embedding,
             vectorDatabase,
+            codeSplitter,
             ...(config.rerankingEnabled && {
                 reranking: {
                     enabled: config.rerankingEnabled,
@@ -100,6 +109,9 @@ class ContextMcpServer {
                 }
             })
         });
+
+        // Log splitter information
+        logSplitterInfo(config, this.context);
 
         // Initialize managers
         this.snapshotManager = new SnapshotManager();

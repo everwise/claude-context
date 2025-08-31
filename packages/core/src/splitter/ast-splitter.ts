@@ -29,13 +29,13 @@ const SPLITTABLE_NODE_TYPES = {
 
 export class AstCodeSplitter implements Splitter {
     private chunkSize: number = 2500;
-    private chunkOverlap: number = 300;
+    private chunkOverlap: number = 0;
     private parser: Parser;
     private langchainFallback: any; // LangChainCodeSplitter for fallback
 
-    constructor(chunkSize?: number, chunkOverlap?: number) {
+    constructor(chunkSize?: number, chunkOverlap?: number, enableChunkOverlap?: boolean) {
         if (chunkSize) this.chunkSize = chunkSize;
-        if (chunkOverlap) this.chunkOverlap = chunkOverlap;
+        if (chunkOverlap && !!enableChunkOverlap) this.chunkOverlap = chunkOverlap;
         this.parser = new Parser();
 
         // Initialize fallback splitter

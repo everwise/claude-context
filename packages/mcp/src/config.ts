@@ -39,6 +39,9 @@ export interface ContextMcpConfig {
     // Vector database configuration
     milvusAddress?: string; // Optional, can be auto-resolved from token
     milvusToken?: string;
+    // Splitter configuration
+    splitterChunkSize: number;
+    splitterChunkOverlap: number;
     // Auto-update configuration
     autoUpdateEnabled: boolean;
     autoUpdateInterval: number; // milliseconds
@@ -194,6 +197,31 @@ export function getQueryPreprocessingConfig(): {
     };
 }
 
+// Helper function to get splitter configuration with environment variable priority
+export function getSplitterConfig(): {
+    chunkSize: number;
+    chunkOverlap: number;
+} {
+    const chunkSizeStr = envManager.get('SPLITTER_CHUNK_SIZE');
+    const chunkOverlapStr = envManager.get('SPLITTER_CHUNK_OVERLAP');
+    
+    const chunkSize = chunkSizeStr ? parseInt(chunkSizeStr, 10) || 1000 : 1000;
+    const chunkOverlap = chunkOverlapStr ? parseInt(chunkOverlapStr, 10) || 200 : 200;
+
+    console.log(
+        `[DEBUG] 🎯 Splitter configuration: SPLITTER_CHUNK_SIZE=${
+            envManager.get('SPLITTER_CHUNK_SIZE') || 'NOT SET'
+        }, SPLITTER_CHUNK_OVERLAP=${
+            envManager.get('SPLITTER_CHUNK_OVERLAP') || 'NOT SET'
+        }, chunkSize=${chunkSize}, chunkOverlap=${chunkOverlap}`
+    );
+
+    return {
+        chunkSize,
+        chunkOverlap
+    };
+}
+
 // Helper function to get PRF configuration with environment variable priority
 export function getPRFConfig(): {
     enabled: boolean;
@@ -262,6 +290,8 @@ export function createMcpConfig(): ContextMcpConfig {
     console.log(`[DEBUG]   QUERY_PREPROCESSING_LANGUAGE_DETECTION: ${envManager.get('QUERY_PREPROCESSING_LANGUAGE_DETECTION') || 'NOT SET'}`);
     console.log(`[DEBUG]   QUERY_PREPROCESSING_IMPLEMENTATION_FOCUS: ${envManager.get('QUERY_PREPROCESSING_IMPLEMENTATION_FOCUS') || 'NOT SET'}`);
     console.log(`[DEBUG]   QUERY_PREPROCESSING_MAX_VARIANTS: ${envManager.get('QUERY_PREPROCESSING_MAX_VARIANTS') || 'NOT SET'}`);
+    console.log(`[DEBUG]   SPLITTER_CHUNK_SIZE: ${envManager.get('SPLITTER_CHUNK_SIZE') || 'NOT SET'}`);
+    console.log(`[DEBUG]   SPLITTER_CHUNK_OVERLAP: ${envManager.get('SPLITTER_CHUNK_OVERLAP') || 'NOT SET'}`);
     console.log(`[DEBUG]   MILVUS_ADDRESS: ${envManager.get('MILVUS_ADDRESS') || 'NOT SET'}`);
     console.log(`[DEBUG]   AUTO_UPDATE: ${envManager.get('AUTO_UPDATE') || 'NOT SET'}`);
     console.log(`[DEBUG]   UPDATE_CHECK_INTERVAL: ${envManager.get('UPDATE_CHECK_INTERVAL') || 'NOT SET'}`);
@@ -270,6 +300,7 @@ export function createMcpConfig(): ContextMcpConfig {
 
     const prfConfig = getPRFConfig();
     const queryPreprocessingConfig = getQueryPreprocessingConfig();
+    const splitterConfig = getSplitterConfig();
     const config: ContextMcpConfig = {
         name: envManager.get('MCP_SERVER_NAME') || "Context MCP Server",
         version: envManager.get('MCP_SERVER_VERSION') || VERSION,
@@ -311,6 +342,9 @@ export function createMcpConfig(): ContextMcpConfig {
         // Vector database configuration - address can be auto-resolved from token
         milvusAddress: envManager.get('MILVUS_ADDRESS'), // Optional, can be resolved from token
         milvusToken: envManager.get('MILVUS_TOKEN'),
+        // Splitter configuration
+        splitterChunkSize: splitterConfig.chunkSize,
+        splitterChunkOverlap: splitterConfig.chunkOverlap,
         // Auto-update configuration
         autoUpdateEnabled: envManager.get('AUTO_UPDATE')?.toLowerCase() !== 'false', // Enabled by default, opt-out
         autoUpdateInterval: parseInt(envManager.get('UPDATE_CHECK_INTERVAL') || '3600000', 10), // Default: 1 hour
@@ -348,6 +382,7 @@ export function logConfigurationSummary(config: ContextMcpConfig): void {
                 : '❌ Disabled'
         }`
     );
+    console.log(`[MCP]   Splitter Configuration: chunkSize=${config.splitterChunkSize}, chunkOverlap=${config.splitterChunkOverlap}`);
     console.log(`[MCP]   Milvus Address: ${config.milvusAddress || (config.milvusToken ? '[Auto-resolve from token]' : '[Not configured]')}`);
     console.log(
         `[MCP]   Auto-Update: ${
@@ -439,6 +474,10 @@ Environment Variables:
   MILVUS_ADDRESS          Milvus address (optional, can be auto-resolved from token)
   MILVUS_TOKEN            Milvus token (optional, used for authentication and address resolution)
 
+  Splitter Configuration:
+  SPLITTER_CHUNK_SIZE     Maximum chunk size in characters (default: 1000)
+  SPLITTER_CHUNK_OVERLAP  Overlap between chunks in characters (default: 200)
+
   Auto-Update Configuration:
   AUTO_UPDATE             Enable/disable auto-updates: true, false (default: true)
   UPDATE_CHECK_INTERVAL   Update check interval in milliseconds (default: 3600000 = 1 hour)
@@ -486,6 +525,9 @@ Examples:
 
   # Start MCP server with all advanced features enabled
   OPENAI_API_KEY=sk-xxx RERANKING_PROVIDER=HuggingFace PRF_ENABLED=true QUERY_PREPROCESSING_ENABLED=true MILVUS_TOKEN=your-token bunx @everwise/claude-context-mcp@latest
+
+  # Start MCP server with custom splitter configuration
+  OPENAI_API_KEY=sk-xxx SPLITTER_CHUNK_SIZE=2000 SPLITTER_CHUNK_OVERLAP=400 MILVUS_TOKEN=your-token bunx @everwise/claude-context-mcp@latest
 
   # Start MCP server with auto-updates disabled
   OPENAI_API_KEY=sk-xxx AUTO_UPDATE=false MILVUS_TOKEN=your-token bunx @everwise/claude-context-mcp@latest
