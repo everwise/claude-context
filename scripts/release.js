@@ -1,41 +1,44 @@
 #!/usr/bin/env node
 
-const { execSync } = require('child_process');
-const fs = require('fs');
-const path = require('path');
-const readline = require('readline');
+const { execSync } = require("child_process");
+const fs = require("fs");
+const path = require("path");
+const readline = require("readline");
 
 /**
  * Release script
  * Handles version updates, commits, and tagging for release
  * Usage: node scripts/release.js [major|minor|patch]
  * Default: patch
- * 
+ *
  * Steps:
  * 1. Run version script to update all package.json files
  * 2. Build all packages to ensure they compile
  * 3. Commit version changes
  * 4. Create and push Git tag
  * 5. Push commits
- * 
+ *
  * Note: Does NOT run publish commands - GitHub workflow handles that
  */
 
 // Package paths that the version script modifies (keep in sync with scripts/version.js)
 const PACKAGE_PATHS = [
-    '.',
-    './examples/basic-usage',
-    './packages/core',
-    './packages/chrome-extension',
-    './packages/mcp',
-    './packages/vscode-extension'
+    ".",
+    "./examples/basic-usage",
+    "./packages/core",
+    "./packages/chrome-extension",
+    "./packages/mcp",
+    "./packages/vscode-extension"
 ];
 
 function runCommand(command, description) {
     console.log(`\n🔧 ${description}...`);
     console.log(`   Running: ${command}`);
     try {
-        const result = execSync(command, { stdio: 'inherit', encoding: 'utf8' });
+        const result = execSync(command, {
+            stdio: "inherit",
+            encoding: "utf8"
+        });
         console.log(`✅ ${description} completed`);
         return result;
     } catch (error) {
@@ -45,17 +48,19 @@ function runCommand(command, description) {
 }
 
 function getCurrentVersion() {
-    const mainPackagePath = path.resolve('.', 'package.json');
+    const mainPackagePath = path.resolve(".", "package.json");
     if (!fs.existsSync(mainPackagePath)) {
-        console.error('❌ Error: Main package.json not found');
+        console.error("❌ Error: Main package.json not found");
         process.exit(1);
     }
-    
+
     try {
-        const mainPackage = JSON.parse(fs.readFileSync(mainPackagePath, 'utf8'));
+        const mainPackage = JSON.parse(
+            fs.readFileSync(mainPackagePath, "utf8")
+        );
         return mainPackage.version;
     } catch (error) {
-        console.error('❌ Error reading main package.json:', error.message);
+        console.error("❌ Error reading main package.json:", error.message);
         process.exit(1);
     }
 }
@@ -65,115 +70,214 @@ async function askToContinue(message) {
         input: process.stdin,
         output: process.stdout
     });
-    
-    return new Promise((resolve) => {
-        rl.question(`${message} (y/N): `, (answer) => {
+
+    return new Promise(resolve => {
+        rl.question(`${message} (y/N): `, answer => {
             rl.close();
-            resolve(answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes');
+            resolve(
+                answer.toLowerCase() === "y" || answer.toLowerCase() === "yes"
+            );
         });
     });
 }
 
 function getPackageJsonPaths() {
-    return PACKAGE_PATHS.map(packagePath => 
-        path.resolve(packagePath, 'package.json')
+    return PACKAGE_PATHS.map(packagePath =>
+        path.resolve(packagePath, "package.json")
     ).filter(fullPath => fs.existsSync(fullPath));
 }
 
 async function checkWorkingDirectory() {
     try {
-        const status = execSync('git status --porcelain', { encoding: 'utf8' });
+        const status = execSync("git status --porcelain", { encoding: "utf8" });
         if (!status.trim()) {
             return; // Clean working directory
         }
 
         const packageJsonPaths = getPackageJsonPaths();
         const modifiedPackageJsons = [];
-        
+
         // Check if any package.json files are already modified
-        const lines = status.trim().split('\n');
+        const lines = status.trim().split("\n");
         for (const line of lines) {
             const filePath = path.resolve(line.slice(3)); // Remove git status prefix
             if (packageJsonPaths.some(pkgPath => pkgPath === filePath)) {
                 modifiedPackageJsons.push(filePath);
             }
         }
-        
+
         if (modifiedPackageJsons.length > 0) {
-            console.log('⚠️  Package.json files are already modified:');
+            console.log("⚠️  Package.json files are already modified:");
             modifiedPackageJsons.forEach(file => {
-                console.log(`   - ${path.relative('.', file)}`);
+                console.log(`   - ${path.relative(".", file)}`);
             });
-            console.log('\nThese files contain version numbers that may conflict with the release process.');
-            
-            const shouldContinue = await askToContinue('Do you want to continue anyway?');
+            console.log(
+                "\nThese files contain version numbers that may conflict with the release process."
+            );
+
+            const shouldContinue = await askToContinue(
+                "Do you want to continue anyway?"
+            );
             if (!shouldContinue) {
-                console.log('Release aborted. Please commit or stash package.json changes first.');
+                console.log(
+                    "Release aborted. Please commit or stash package.json changes first."
+                );
                 process.exit(0);
             }
         }
-        
+
         // Check for other uncommitted changes
         const otherChanges = lines.filter(line => {
             const filePath = path.resolve(line.slice(3));
             return !packageJsonPaths.some(pkgPath => pkgPath === filePath);
         });
-        
+
         if (otherChanges.length > 0) {
-            console.log('⚠️  Working directory has other uncommitted changes:');
+            console.log("⚠️  Working directory has other uncommitted changes:");
             otherChanges.forEach(line => {
                 console.log(`   ${line}`);
             });
-            
-            const shouldContinue = await askToContinue('Do you want to continue with the release?');
+
+            const shouldContinue = await askToContinue(
+                "Do you want to continue with the release?"
+            );
             if (!shouldContinue) {
-                console.log('Release aborted. Please commit or stash changes first.');
+                console.log(
+                    "Release aborted. Please commit or stash changes first."
+                );
                 process.exit(0);
             }
         }
-        
     } catch (error) {
-        console.error('❌ Error checking git status:', error.message);
+        console.error("❌ Error checking git status:", error.message);
         process.exit(1);
     }
 }
 
 function checkCurrentBranch() {
     try {
-        const branch = execSync('git branch --show-current', { encoding: 'utf8' }).trim();
-        if (branch !== 'master' && branch !== 'main') {
-            console.log(`⚠️  Current branch is '${branch}', not 'main' or 'master'`);
-            console.log('Are you sure you want to release from this branch?');
+        const branch = execSync("git branch --show-current", {
+            encoding: "utf8"
+        }).trim();
+        if (branch !== "master" && branch !== "main") {
+            console.log(
+                `⚠️  Current branch is '${branch}', not 'main' or 'master'`
+            );
+            console.log("Are you sure you want to release from this branch?");
             // Could add confirmation prompt here if needed
         }
         return branch;
     } catch (error) {
-        console.error('❌ Error checking current branch:', error.message);
+        console.error("❌ Error checking current branch:", error.message);
+        process.exit(1);
+    }
+}
+
+function getLatestTag() {
+    try {
+        const latestTag = execSync("git describe --tags --abbrev=0", {
+            encoding: "utf8"
+        }).trim();
+        return latestTag;
+    } catch (error) {
+        // If no tags exist, return null
+        return null;
+    }
+}
+
+function getCommitsSinceLastTag() {
+    const latestTag = getLatestTag();
+
+    if (!latestTag) {
+        console.log(
+            "\n📝 No previous tags found - this will be the first tagged release"
+        );
+
+        // Get all commits for tag message
+        try {
+            const allCommits = execSync("git log --oneline --no-merges", {
+                encoding: "utf8"
+            }).trim();
+            if (allCommits) {
+                console.log("\n📋 All commits in this repository:");
+                console.log(allCommits);
+                return allCommits;
+            }
+        } catch (error) {
+            console.log("   No commits found");
+        }
+        return "";
+    }
+
+    console.log(`\n📋 Commits since last tag (${latestTag}):`);
+    console.log("==========================================");
+
+    try {
+        const commitsSince = execSync(
+            `git log ${latestTag}..HEAD --oneline --no-merges`,
+            { encoding: "utf8" }
+        ).trim();
+
+        if (!commitsSince) {
+            console.log("   No new commits since last tag");
+            console.log("   ⚠️  Consider if a release is necessary");
+            return "";
+        } else {
+            console.log(commitsSince);
+
+            // Count commits
+            const commitCount = commitsSince.split("\n").length;
+            console.log(
+                `\n📊 Total: ${commitCount} commit${
+                    commitCount === 1 ? "" : "s"
+                } since ${latestTag}`
+            );
+
+            console.log("==========================================");
+            return commitsSince;
+        }
+    } catch (error) {
+        console.error(
+            "❌ Error getting commits since last tag:",
+            error.message
+        );
         process.exit(1);
     }
 }
 
 async function main() {
-    console.log('🚀 Starting Release Process');
-    console.log('==============================');
+    console.log("🚀 Starting Release Process");
+    console.log("==============================");
 
     // Parse command line arguments
-    const versionType = process.argv[2] || 'patch';
-    
-    if (!['major', 'minor', 'patch'].includes(versionType)) {
-        console.error('❌ Error: Version type must be one of: major, minor, patch');
+    const versionType = process.argv[2] || "patch";
+
+    if (!["major", "minor", "patch"].includes(versionType)) {
+        console.error(
+            "❌ Error: Version type must be one of: major, minor, patch"
+        );
         process.exit(1);
     }
 
     // Pre-flight checks
-    console.log('\n📋 Pre-flight checks...');
+    console.log("\n📋 Pre-flight checks...");
     await checkWorkingDirectory();
     const currentBranch = checkCurrentBranch();
     const oldVersion = getCurrentVersion();
-    
+
     console.log(`   Current version: ${oldVersion}`);
     console.log(`   Version increment: ${versionType}`);
     console.log(`   Current branch: ${currentBranch}`);
+
+    // Show commits since last tag and capture for tag message
+    const commitsForTag = getCommitsSinceLastTag();
+
+    // Ask for confirmation to proceed
+    const shouldProceed = await askToContinue("\nProceed with release?");
+    if (!shouldProceed) {
+        console.log("Release aborted by user.");
+        process.exit(0);
+    }
 
     // Step 1: Update versions
     runCommand(
@@ -186,55 +290,67 @@ async function main() {
     console.log(`\n📦 Version updated: ${oldVersion} → ${newVersion}`);
 
     // Step 2: Build all packages to ensure they compile
-    runCommand('pnpm build', 'Building all packages');
+    runCommand("pnpm build", "Building all packages");
 
     // Step 3: Commit version changes (only package.json files)
     const packageJsonPaths = getPackageJsonPaths();
-    const relativePackagePaths = packageJsonPaths.map(p => path.relative('.', p));
-    
+    const relativePackagePaths = packageJsonPaths.map(p =>
+        path.relative(".", p)
+    );
+
     console.log(`\n📝 Adding only package.json files:`);
     relativePackagePaths.forEach(p => console.log(`   - ${p}`));
-    
+
     runCommand(
-        `git add ${relativePackagePaths.join(' ')}`,
-        'Staging package.json changes'
+        `git add ${relativePackagePaths.join(" ")}`,
+        "Staging package.json changes"
     );
     runCommand(
         `git commit -m "chore: Bump package versions to ${newVersion}"`,
-        'Committing version changes'
+        "Committing version changes"
     );
 
-    // Step 4: Create and push Git tag
+    // Step 4: Create and push Git tag with commit list
     const tagName = `v${newVersion}`;
-    runCommand(
-        `git tag ${tagName}`,
-        `Creating Git tag ${tagName}`
-    );
+
+    if (commitsForTag) {
+        // Create annotated tag with commit list as message
+        const tagMessage = `Release ${newVersion}\n\nChanges:\n${commitsForTag}`;
+        runCommand(
+            `git tag -a ${tagName} -m "${tagMessage.replace(/"/g, '\\"')}"`,
+            `Creating Git tag ${tagName} with commit list`
+        );
+    } else {
+        // Fallback to simple tag if no commits
+        runCommand(
+            `git tag ${tagName} -m "Release ${newVersion}"`,
+            `Creating Git tag ${tagName}`
+        );
+    }
 
     // Step 5: Push commits and tags
     runCommand(
         `git push origin ${currentBranch}`,
         `Pushing commits to ${currentBranch}`
     );
-    runCommand(
-        `git push origin ${tagName}`,
-        `Pushing tag ${tagName}`
-    );
+    runCommand(`git push origin ${tagName}`, `Pushing tag ${tagName}`);
 
     // Success message
-    console.log('\n🎉 Release preparation completed successfully!');
-    console.log('======================================');
+    console.log("\n🎉 Release preparation completed successfully!");
+    console.log("======================================");
     console.log(`✅ Version: ${oldVersion} → ${newVersion}`);
     console.log(`✅ Tag: ${tagName} created and pushed`);
     console.log(`✅ Commits pushed to ${currentBranch}`);
-    console.log('\n📝 Next steps:');
-    console.log('   - GitHub workflow should automatically publish packages');
-    console.log('   - Monitor GitHub Actions for publication status');
-    console.log(`   - Check published packages: https://github.com/everwise/claude-context/packages`);
+    console.log("\n📝 Next steps:");
+    console.log("   - GitHub workflow should automatically publish packages");
+    console.log("   - Monitor GitHub Actions for publication status");
+    console.log(
+        `   - Check published packages: https://github.com/everwise/claude-context/packages`
+    );
 }
 
 // Show help if requested
-if (process.argv.includes('--help') || process.argv.includes('-h')) {
+if (process.argv.includes("--help") || process.argv.includes("-h")) {
     console.log(`
 Release Script
 
@@ -264,7 +380,7 @@ Note: Does NOT publish packages - GitHub workflow handles that automatically.
 
 if (require.main === module) {
     main().catch(error => {
-        console.error('❌ Release failed:', error.message);
+        console.error("❌ Release failed:", error.message);
         process.exit(1);
     });
 }
