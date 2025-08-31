@@ -1,3 +1,3 @@
-const rootPackageJson = require("../../../package.json");
+const packageJson = require("../package.json");
 
-export const VERSION = rootPackageJson.version;
+export const VERSION = packageJson.version;
