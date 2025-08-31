@@ -204,9 +204,9 @@ export function getSplitterConfig(): {
 } {
     const chunkSizeStr = envManager.get('SPLITTER_CHUNK_SIZE');
     const chunkOverlapStr = envManager.get('SPLITTER_CHUNK_OVERLAP');
-    
-    const chunkSize = chunkSizeStr ? parseInt(chunkSizeStr, 10) || 1000 : 1000;
-    const chunkOverlap = chunkOverlapStr ? parseInt(chunkOverlapStr, 10) || 200 : 200;
+
+    const chunkSize = chunkSizeStr ? parseInt(chunkSizeStr, 10) || 2500 : 2500;
+    const chunkOverlap = chunkOverlapStr ? parseInt(chunkOverlapStr, 10) ?? 0 : 0;
 
     console.log(
         `[DEBUG] 🎯 Splitter configuration: SPLITTER_CHUNK_SIZE=${

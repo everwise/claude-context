@@ -792,13 +792,13 @@ class SemanticSearchController {
         // Load splitter config
         if (splitterConfig) {
             this.splitterTypeSelect.value = splitterConfig.type || 'langchain';
-            this.chunkSizeInput.value = splitterConfig.chunkSize || 1000;
-            this.chunkOverlapInput.value = splitterConfig.chunkOverlap || 200;
+            this.chunkSizeInput.value = splitterConfig.chunkSize || 2500;
+            this.chunkOverlapInput.value = splitterConfig.chunkOverlap || 0;
         } else {
             // Set default values
             this.splitterTypeSelect.value = 'langchain';
-            this.chunkSizeInput.value = 1000;
-            this.chunkOverlapInput.value = 200;
+            this.chunkSizeInput.value = 2500;
+            this.chunkOverlapInput.value = 0;
         }
 
         this.validateForm();
@@ -813,4 +813,4 @@ if (document.readyState === 'loading') {
     });
 } else {
     searchController = new SemanticSearchController();
-} 
+}

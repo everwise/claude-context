@@ -450,15 +450,15 @@ export class ConfigManager {
         if (!type) {
             return {
                 type: SplitterType.AST,
-                chunkSize: 1000,
-                chunkOverlap: 200
+                chunkSize: 2500,
+                chunkOverlap: 0
             };
         }
 
         return {
             type: type as SplitterType,
-            chunkSize: chunkSize || 1000,
-            chunkOverlap: chunkOverlap || 200
+            chunkSize: chunkSize || 2500,
+            chunkOverlap: chunkOverlap || 0
         };
     }
 
@@ -477,8 +477,8 @@ export class ConfigManager {
 
         return {
             type: type || SplitterType.AST,
-            chunkSize: chunkSizeStr ? parseInt(chunkSizeStr, 10) || 1000 : 1000,
-            chunkOverlap: chunkOverlapStr ? parseInt(chunkOverlapStr, 10) || 200 : 200
+            chunkSize: chunkSizeStr ? parseInt(chunkSizeStr, 10) || 2500 : 2500,
+            chunkOverlap: chunkOverlapStr ? parseInt(chunkOverlapStr, 10) || 0 : 0
         };
     }
 
@@ -493,8 +493,8 @@ export class ConfigManager {
         const workspaceConfig = vscode.workspace.getConfiguration(ConfigManager.CONFIG_KEY);
 
         await workspaceConfig.update('splitter.type', splitterConfig.type || SplitterType.AST, vscode.ConfigurationTarget.Global);
-        await workspaceConfig.update('splitter.chunkSize', splitterConfig.chunkSize || 1000, vscode.ConfigurationTarget.Global);
-        await workspaceConfig.update('splitter.chunkOverlap', splitterConfig.chunkOverlap || 200, vscode.ConfigurationTarget.Global);
+        await workspaceConfig.update('splitter.chunkSize', splitterConfig.chunkSize || 2500, vscode.ConfigurationTarget.Global);
+        await workspaceConfig.update('splitter.chunkOverlap', splitterConfig.chunkOverlap || 0, vscode.ConfigurationTarget.Global);
     }
 
     /**
