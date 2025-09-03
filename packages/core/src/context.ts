@@ -24,7 +24,7 @@ import { envManager } from './utils/env-manager';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { minimatch } from 'minimatch';
+import ignore from 'ignore';
 import { FileSynchronizer } from './sync/synchronizer';
 
 const DEFAULT_SUPPORTED_EXTENSIONS = [
@@ -113,7 +113,8 @@ export class Context {
     private queryPreprocessor: SimpleQueryPreprocessor;
     private prfEngine: PRFEngine | null = null;
     private synchronizers = new Map<string, FileSynchronizer>();
-    private projectIgnorePatterns = new Map<string, string[]>(); // Per-project isolation
+    private projectIgnorePatterns = new Map<string, string[]>(); // Per-project patterns
+    private projectIgnoreHandlers = new Map<string, any>(); // ignore library instances per project
     private embeddingCache: EmbeddingCache;
 
     constructor(config: ContextConfig = {}) {
@@ -1073,15 +1074,23 @@ export class Context {
     private async getCodeFiles(codebasePath: string): Promise<string[]> {
         const files: string[] = [];
         const normalizedPath = path.resolve(codebasePath);
+        const fileStats = { total: 0, ignored: 0, unsupported: 0, included: 0 };
+        const ignoredByPattern = new Map<string, number>();
+
 
         const traverseDirectory = async (currentPath: string) => {
             const entries = await fs.promises.readdir(currentPath, { withFileTypes: true });
 
             for (const entry of entries) {
                 const fullPath = path.join(currentPath, entry.name);
+                fileStats.total++;
 
                 // Check if path matches ignore patterns using project-specific patterns
-                if (this.matchesIgnorePattern(fullPath, codebasePath, normalizedPath)) {
+                const matchedPattern = this.getMatchedIgnorePattern(fullPath, codebasePath, normalizedPath);
+                if (matchedPattern) {
+                    fileStats.ignored++;
+                    const count = ignoredByPattern.get(matchedPattern) || 0;
+                    ignoredByPattern.set(matchedPattern, count + 1);
                     continue;
                 }
 
@@ -1089,14 +1098,37 @@ export class Context {
                     await traverseDirectory(fullPath);
                 } else if (entry.isFile()) {
                     const ext = path.extname(entry.name);
+
                     if (this.supportedExtensions.includes(ext)) {
                         files.push(fullPath);
+                        fileStats.included++;
+                    } else {
+                        fileStats.unsupported++;
                     }
                 }
             }
         };
 
         await traverseDirectory(codebasePath);
+
+        // Log comprehensive discovery statistics
+        console.log(`\n[FILE-DISCOVERY] 📊 Discovery Summary:`);
+        console.log(`  Total files/dirs encountered: ${fileStats.total}`);
+        console.log(`  Files ignored by patterns: ${fileStats.ignored}`);
+        console.log(`  Files with unsupported extensions: ${fileStats.unsupported}`);
+        console.log(`  Files included for indexing: ${fileStats.included}`);
+
+        // Log ignore pattern effectiveness
+        if (ignoredByPattern.size > 0) {
+            console.log(`\n[FILE-DISCOVERY] 🚫 Top ignore patterns used:`);
+            const sortedIgnorePatterns = Array.from(ignoredByPattern.entries())
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 10);
+            sortedIgnorePatterns.forEach(([pattern, count]) => {
+                console.log(`  ${pattern}: ${count} files/dirs ignored`);
+            });
+        }
+
         return files;
     }
 
@@ -1433,35 +1465,67 @@ export class Context {
     private async loadIgnorePatterns(codebasePath: string): Promise<void> {
         const normalizedPath = path.resolve(codebasePath);
 
+        console.log(`[IGNORE-PATTERNS] 📁 Loading ignore patterns for: ${normalizedPath}`);
+
         try {
             let fileBasedPatterns: string[] = [];
+            const patternSources: string[] = [];
 
             // Load all .xxxignore files in codebase directory
             const ignoreFiles = await this.findIgnoreFiles(codebasePath);
             for (const ignoreFile of ignoreFiles) {
                 const patterns = await this.loadIgnoreFile(ignoreFile, path.basename(ignoreFile));
-                fileBasedPatterns.push(...patterns);
+                if (patterns.length > 0) {
+                    fileBasedPatterns.push(...patterns);
+                    patternSources.push(`${path.basename(ignoreFile)} (${patterns.length} patterns)`);
+                }
             }
 
             // Load global ~/.context/.contextignore
             const globalIgnorePatterns = await this.loadGlobalIgnoreFile();
-            fileBasedPatterns.push(...globalIgnorePatterns);
+            if (globalIgnorePatterns.length > 0) {
+                fileBasedPatterns.push(...globalIgnorePatterns);
 
-            // Store project-specific patterns (base patterns + file-based patterns)
+                // Store project-specific patterns (base patterns + file-based patterns)
+                patternSources.push(`global .contextignore (${globalIgnorePatterns.length} patterns)`);
+            }
+
+            // Load custom ignore patterns from environment
+            const envIgnorePatterns = this.getCustomIgnorePatternsFromEnv();
+            if (envIgnorePatterns.length > 0) {
+                fileBasedPatterns.push(...envIgnorePatterns);
+                patternSources.push(`environment variables (${envIgnorePatterns.length} patterns)`);
+            }
+
+            // Load any custom ignore patterns added via MCP
+            if (this.ignorePatterns.length > DEFAULT_IGNORE_PATTERNS.length) {
+                const mcpCustomPatterns = this.ignorePatterns.filter(p => !DEFAULT_IGNORE_PATTERNS.includes(p));
+                if (mcpCustomPatterns.length > 0) {
+                    fileBasedPatterns.push(...mcpCustomPatterns);
+                    patternSources.push(`MCP custom patterns (${mcpCustomPatterns.length} patterns)`);
+                }
+            }
+
+            // Combine all patterns (defaults + loaded patterns)
             const projectPatterns = [
                 ...DEFAULT_IGNORE_PATTERNS,
                 ...fileBasedPatterns
             ];
 
-            // Remove duplicates
+            // Remove duplicates and store
             const uniqueProjectPatterns = [...new Set(projectPatterns)];
             this.projectIgnorePatterns.set(normalizedPath, uniqueProjectPatterns);
 
-            if (fileBasedPatterns.length > 0) {
-                console.log(`[Context] 🚫 Loaded ${fileBasedPatterns.length} project-specific ignore patterns for ${normalizedPath}`);
-            } else {
-                console.log(`[Context] 📄 No project-specific ignore files found for ${normalizedPath}, using defaults`);
-            }
+            // Create single ignore handler for all patterns
+            const ignoreHandler = ignore().add(uniqueProjectPatterns);
+            this.projectIgnoreHandlers.set(normalizedPath, ignoreHandler);
+
+            // Enhanced logging
+            console.log(`[IGNORE-PATTERNS] 📊 Pattern loading summary:`);
+            console.log(`  Default patterns: ${DEFAULT_IGNORE_PATTERNS.length}`);
+            console.log(`  Additional patterns: ${fileBasedPatterns.length}`);
+            console.log(`  Pattern sources: ${patternSources.length > 0 ? patternSources.join(', ') : 'none'}`);
+            console.log(`  Total unique patterns: ${uniqueProjectPatterns.length}`);
         } catch (error) {
             console.warn(`[Context] ⚠️ Failed to load ignore patterns for ${normalizedPath}: ${error}`);
             // Store default patterns on error
@@ -1547,62 +1611,50 @@ export class Context {
      * @param basePath Base path for relative pattern matching
      * @returns True if path should be ignored
      */
-    private matchesIgnorePattern(filePath: string, basePath: string, projectPath?: string): boolean {
-        // Get project-specific patterns if available, otherwise fall back to global patterns
-        const patternsToUse = projectPath ?
-            this.getProjectIgnorePatterns(projectPath) :
-            this.ignorePatterns;
+    public matchesIgnorePattern(filePath: string, basePath: string, projectPath?: string): boolean {
+        return this.getMatchedIgnorePattern(filePath, basePath, projectPath) !== null;
+    }
 
-        if (patternsToUse.length === 0) {
-            return false;
-        }
-
+    /**
+     * Get the first ignore pattern that matches a path
+     * @param filePath Path to check
+     * @param basePath Base path for relative pattern matching
+     * @param projectPath Project path for getting project-specific patterns
+     * @returns The matching pattern or null if no match
+     */
+    private getMatchedIgnorePattern(filePath: string, basePath: string, projectPath?: string): string | null {
         const relativePath = path.relative(basePath, filePath);
         const normalizedPath = relativePath.replace(/\\/g, '/'); // Normalize path separators
 
-        for (const pattern of patternsToUse) {
-            if (this.isPatternMatch(normalizedPath, pattern)) {
-                return true;
+        // Use project-specific ignore handler if available
+        const resolvedPath = projectPath ? path.resolve(projectPath) : null;
+        const ignoreHandler = resolvedPath ?
+            this.projectIgnoreHandlers.get(resolvedPath) :
+            ignore().add(this.ignorePatterns);
+
+        if (!ignoreHandler) {
+            return null;
+        }
+
+        if (ignoreHandler.ignores(normalizedPath)) {
+            // Find which pattern matched (for logging)
+            const allPatterns = resolvedPath ?
+                this.projectIgnorePatterns.get(resolvedPath) || [] :
+                this.ignorePatterns;
+
+            // Find which pattern matched
+            for (const pattern of allPatterns) {
+                const testHandler = ignore().add([pattern]);
+                if (testHandler.ignores(normalizedPath)) {
+                    return pattern;
+                }
             }
+            return 'unknown-pattern';
         }
 
-        return false;
+        return null;
     }
 
-    /**
-     * Simple glob pattern matching
-     * @param filePath File path to test
-     * @param pattern Glob pattern
-     * @returns True if pattern matches
-     */
-    private isPatternMatch(filePath: string, pattern: string): boolean {
-        // Handle directory patterns (ending with /)
-        if (pattern.endsWith('/')) {
-            const dirPattern = pattern.slice(0, -1);
-            const pathParts = filePath.split('/');
-            return pathParts.some(part => this.simpleGlobMatch(part, dirPattern));
-        }
-
-        // Handle file patterns
-        if (pattern.includes('/')) {
-            // Pattern with path separator - match exact path
-            return this.simpleGlobMatch(filePath, pattern);
-        } else {
-            // Pattern without path separator - match filename in any directory
-            const fileName = path.basename(filePath);
-            return this.simpleGlobMatch(fileName, pattern);
-        }
-    }
-
-    /**
-     * Proper glob matching supporting ** wildcards using minimatch
-     * @param text Text to test
-     * @param pattern Glob pattern including ** for directory traversal
-     * @returns True if pattern matches
-     */
-    private simpleGlobMatch(text: string, pattern: string): boolean {
-        return minimatch(text, pattern);
-    }
 
     /**
      * Get custom extensions from environment variables

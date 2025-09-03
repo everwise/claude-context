@@ -163,12 +163,12 @@ importers:
       glob:
         specifier: ^10.0.0
         version: 10.4.5
+      ignore:
+        specifier: ^7.0.5
+        version: 7.0.5
       langchain:
         specifier: ^0.3.27
         version: 0.3.31(@langchain/core@0.3.72(@opentelemetry/api@1.9.0)(openai@5.16.0(ws@8.18.3)(zod@3.25.76)))(@opentelemetry/api@1.9.0)(cheerio@1.1.2)(handlebars@4.7.8)(openai@5.16.0(ws@8.18.3)(zod@3.25.76))(ws@8.18.3)
-      minimatch:
-        specifier: ^10.0.3
-        version: 10.0.3
       ollama:
         specifier: ^0.5.16
         version: 0.5.17

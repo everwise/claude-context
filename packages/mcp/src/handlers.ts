@@ -369,7 +369,7 @@ export class ToolHandlers {
 
             // Initialize file synchronizer with proper ignore patterns (including project-specific patterns)
             const { FileSynchronizer } = await import("@everwise/claude-context-core");
-            const ignorePatterns = this.context.getIgnorePatterns() || [];
+            const ignorePatterns = this.context.getProjectIgnorePatterns(absolutePath);
             console.log(`[BACKGROUND-INDEX] Using ignore patterns: ${ignorePatterns.join(', ')}`);
             const synchronizer = new FileSynchronizer(absolutePath, ignorePatterns);
             await synchronizer.initialize();
