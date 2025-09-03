@@ -383,7 +383,7 @@ export class MilvusVectorDatabase implements VectorDatabase {
             output_fields: ['id', 'content', 'relativePath', 'startLine', 'endLine', 'fileExtension', 'metadata'],
         };
 
-        // Apply boolean expression filter if provided (e.g., fileExtension in [".ts",".py"]) 
+        // Apply boolean expression filter if provided (e.g., fileExtension in [".ts",".py"])
         if (options?.filterExpr && options.filterExpr.trim().length > 0) {
             searchParams.expr = options.filterExpr;
         }

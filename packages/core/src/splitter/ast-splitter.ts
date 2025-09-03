@@ -122,7 +122,16 @@ export class AstCodeSplitter implements Splitter {
         const chunks: CodeChunk[] = [];
         const codeLines = code.split('\n');
 
+        // Group consecutive imports at file start
+        const { chunk: importChunk, processedNodes } = this.groupConsecutiveImports(node, code, language, filePath);
+        if (importChunk) {
+            chunks.push(importChunk);
+        }
+
         const traverse = (currentNode: Parser.SyntaxNode) => {
+            // Skip already processed import nodes
+            if (processedNodes.has(currentNode)) return;
+
             // Check if this node type should be split into a chunk
             if (splittableTypes.includes(currentNode.type)) {
                 const startLine = currentNode.startPosition.row + 1;
@@ -175,15 +184,33 @@ export class AstCodeSplitter implements Splitter {
                 refinedChunks.push(chunk);
             } else {
                 // Split large chunks using character-based splitting
-                const subChunks = this.splitLargeChunk(chunk, originalCode);
+                const subChunks = this.splitLargeChunk(chunk);
                 refinedChunks.push(...subChunks);
             }
         }
 
-        return this.addOverlap(refinedChunks);
+        return this.addOverlap(this.deduplicateChunks(refinedChunks));
     }
 
-    private splitLargeChunk(chunk: CodeChunk, originalCode: string): CodeChunk[] {
+    private deduplicateChunks(chunks: CodeChunk[]): CodeChunk[] {
+        const seenRanges = new Set<string>();
+        const deduplicatedChunks: CodeChunk[] = [];
+
+        for (const chunk of chunks) {
+            const rangeKey = `${chunk.metadata.startLine}-${chunk.metadata.endLine}`;
+
+            if (!seenRanges.has(rangeKey)) {
+                seenRanges.add(rangeKey);
+                deduplicatedChunks.push(chunk);
+            } else {
+                console.log(`[AST-DEDUPE] Removed duplicate chunk at lines ${rangeKey} from ${chunk.metadata.filePath}`);
+            }
+        }
+
+        return deduplicatedChunks;
+    }
+
+    private splitLargeChunk(chunk: CodeChunk): CodeChunk[] {
         const lines = chunk.content.split('\n');
         const subChunks: CodeChunk[] = [];
         let currentChunk = '';
@@ -278,5 +305,50 @@ export class AstCodeSplitter implements Splitter {
      */
     static isLanguageSupported(language: string): boolean {
         return this.getSupportedLanguages().includes(language.toLowerCase());
+    }
+
+    private groupConsecutiveImports(
+        rootNode: Parser.SyntaxNode,
+        code: string,
+        language: string,
+        filePath?: string
+    ): { chunk: CodeChunk | null, processedNodes: Set<Parser.SyntaxNode> } {
+        const children = rootNode.children;
+        const imports: Parser.SyntaxNode[] = [];
+
+        // Find consecutive imports from start (skip only comments/whitespace)
+        for (const child of children) {
+            if (child.type === 'import_statement') {
+                imports.push(child);
+            } else if (child.type === 'comment' || this.isWhitespaceNode(child)) {
+                continue; // Skip comments and whitespace
+            } else {
+                break; // Hit first real code - stop grouping
+            }
+        }
+
+        if (imports.length <= 1) {
+            return { chunk: null, processedNodes: new Set() };
+        }
+
+        const firstImport = imports[0];
+        const lastImport = imports[imports.length - 1];
+
+        return {
+            chunk: {
+                content: code.slice(firstImport.startIndex, lastImport.endIndex),
+                metadata: {
+                    startLine: firstImport.startPosition.row + 1,
+                    endLine: lastImport.endPosition.row + 1,
+                    language,
+                    filePath,
+                }
+            },
+            processedNodes: new Set(imports)
+        };
+    }
+
+    private isWhitespaceNode(node: Parser.SyntaxNode): boolean {
+        return node.type === '\n' || node.type === 'whitespace' || node.text?.trim() === '';
     }
 }

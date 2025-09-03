@@ -285,7 +285,8 @@ export class ClusterManager {
 
             // Get Default Project ID
             const projects = await clusterManager.listProjects();
-            const defaultProject = projects.find(p => p.projectName === 'Default Project');
+            // 'Default Project' is the default name on Zilliz Cloud, and 'default' is the default name for local standalone.
+            const defaultProject = projects.find(p => p.projectName && ['Default Project', 'default'].includes(p.projectName));
 
             if (!defaultProject) {
                 throw new Error('Default Project not found');

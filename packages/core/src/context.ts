@@ -1401,7 +1401,7 @@ export class Context {
     private getLanguageFromExtension(ext: string): string {
         const languageMap: Record<string, string> = {
             '.ts': 'typescript',
-            '.tsx': 'typescript',
+            '.tsx': 'tsx',
             '.js': 'javascript',
             '.jsx': 'javascript',
             '.py': 'python',
