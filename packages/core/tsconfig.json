@@ -18,7 +18,12 @@
         "composite": true,
         "allowSyntheticDefaultImports": true,
         "downlevelIteration": true,
-        "types": ["node", "vitest/globals"]
+        "incremental": true,
+        "tsBuildInfoFile": "./dist/.tsbuildinfo",
+        "types": [
+            "node",
+            "vitest/globals"
+        ]
     },
     "include": [
         "src/**/*"
