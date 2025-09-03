@@ -22,6 +22,7 @@
     "fs-extra": "^11.0.0",
     "glob": "^10.0.0",
     "langchain": "^0.3.27",
+    "minimatch": "^10.0.3",
     "ollama": "^0.5.16",
     "openai": "^5.1.1",
     "tree-sitter": "^0.21.1",

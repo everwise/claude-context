@@ -24,6 +24,7 @@ import { envManager } from './utils/env-manager';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import { minimatch } from 'minimatch';
 import { FileSynchronizer } from './sync/synchronizer';
 
 const DEFAULT_SUPPORTED_EXTENSIONS = [
@@ -1594,19 +1595,13 @@ export class Context {
     }
 
     /**
-     * Simple glob matching supporting * wildcard
+     * Proper glob matching supporting ** wildcards using minimatch
      * @param text Text to test
-     * @param pattern Pattern with * wildcards
+     * @param pattern Glob pattern including ** for directory traversal
      * @returns True if pattern matches
      */
     private simpleGlobMatch(text: string, pattern: string): boolean {
-        // Convert glob pattern to regex
-        const regexPattern = pattern
-            .replace(/[.+^${}()|[\]\\]/g, '\\$&') // Escape regex special chars except *
-            .replace(/\*/g, '.*'); // Convert * to .*
-
-        const regex = new RegExp(`^${regexPattern}$`);
-        return regex.test(text);
+        return minimatch(text, pattern);
     }
 
     /**
