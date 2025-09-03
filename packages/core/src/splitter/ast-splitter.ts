@@ -1,9 +1,10 @@
 import Parser from 'tree-sitter';
 import { Splitter, CodeChunk } from './index';
+import { LangChainCodeSplitter } from './langchain-splitter';
 
 // Language parsers
 const JavaScript = require('tree-sitter-javascript');
-const TypeScript = require('tree-sitter-typescript').typescript;
+const { typescript: TypeScript, tsx: TSX } = require('tree-sitter-typescript');
 const Python = require('tree-sitter-python');
 const Java = require('tree-sitter-java');
 const Cpp = require('tree-sitter-cpp');
@@ -15,13 +16,14 @@ const Scala = require('tree-sitter-scala');
 
 // Node types that represent logical code units
 const SPLITTABLE_NODE_TYPES = {
-    javascript: ['function_declaration', 'arrow_function', 'class_declaration', 'method_definition', 'export_statement'],
-    typescript: ['function_declaration', 'arrow_function', 'class_declaration', 'method_definition', 'export_statement', 'interface_declaration', 'type_alias_declaration'],
-    python: ['function_definition', 'class_definition', 'decorated_definition', 'async_function_definition'],
-    java: ['method_declaration', 'class_declaration', 'interface_declaration', 'constructor_declaration'],
+    javascript: ['import_statement', 'function_declaration', 'class_declaration', 'method_definition', 'export_statement', 'variable_declaration', 'lexical_declaration', 'arrow_function', 'export_declaration'],
+    typescript: ['import_statement', 'function_declaration', 'class_declaration', 'method_definition', 'export_statement', 'interface_declaration', 'type_alias_declaration', 'variable_declaration', 'lexical_declaration', 'arrow_function', 'export_declaration'],
+    tsx: ['import_statement', 'function_declaration', 'class_declaration', 'method_definition', 'export_statement', 'interface_declaration', 'type_alias_declaration', 'variable_declaration', 'lexical_declaration', 'arrow_function', 'export_declaration'],
+    python: ['function_definition', 'class_definition', 'decorated_definition', 'async_function_definition', 'import_statement', 'import_from_statement', 'future_import_statement', 'assignment', 'assignment_expression'],
+    java: ['method_declaration', 'class_declaration', 'interface_declaration', 'constructor_declaration', 'import_declaration', 'package_declaration', 'field_declaration', 'local_variable_declaration'],
     cpp: ['function_definition', 'class_specifier', 'namespace_definition', 'declaration'],
-    go: ['function_declaration', 'method_declaration', 'type_declaration', 'var_declaration', 'const_declaration'],
-    rust: ['function_item', 'impl_item', 'struct_item', 'enum_item', 'trait_item', 'mod_item'],
+    go: ['function_declaration', 'method_declaration', 'type_declaration', 'var_declaration', 'const_declaration', 'import_declaration'],
+    rust: ['function_item', 'impl_item', 'struct_item', 'enum_item', 'trait_item', 'mod_item', 'use_declaration', 'static_item', 'const_item'],
     csharp: ['method_declaration', 'class_declaration', 'interface_declaration', 'struct_declaration', 'enum_declaration'],
     ruby: ['method', 'class', 'module', 'def', 'singleton_method'],
     scala: ['method_declaration', 'class_declaration', 'interface_declaration', 'constructor_declaration']
@@ -39,7 +41,6 @@ export class AstCodeSplitter implements Splitter {
         this.parser = new Parser();
 
         // Initialize fallback splitter
-        const { LangChainCodeSplitter } = require('./langchain-splitter');
         this.langchainFallback = new LangChainCodeSplitter(chunkSize, chunkOverlap);
     }
 
@@ -91,6 +92,7 @@ export class AstCodeSplitter implements Splitter {
             'js': { parser: JavaScript, nodeTypes: SPLITTABLE_NODE_TYPES.javascript },
             'typescript': { parser: TypeScript, nodeTypes: SPLITTABLE_NODE_TYPES.typescript },
             'ts': { parser: TypeScript, nodeTypes: SPLITTABLE_NODE_TYPES.typescript },
+            'tsx': { parser: TSX, nodeTypes: SPLITTABLE_NODE_TYPES.tsx },
             'python': { parser: Python, nodeTypes: SPLITTABLE_NODE_TYPES.python },
             'py': { parser: Python, nodeTypes: SPLITTABLE_NODE_TYPES.python },
             'java': { parser: Java, nodeTypes: SPLITTABLE_NODE_TYPES.java },
@@ -266,7 +268,7 @@ export class AstCodeSplitter implements Splitter {
      */
     static getSupportedLanguages(): string[] {
         return [
-            'javascript', 'js', 'typescript', 'ts', 'python', 'py',
+            'javascript', 'js', 'typescript', 'ts', 'tsx', 'python', 'py',
             'java', 'cpp', 'c++', 'c', 'go', 'rust', 'rs', 'cs', 'csharp', 'ruby', 'rb', 'scala'
         ];
     }
