@@ -278,6 +278,36 @@ This tool is versatile and can be used before completing various tasks to retrie
                             required: ["path"]
                         }
                     },
+                    {
+                        name: "update_files",
+                        description: `Force re-index specific files or directory. Updates the search index for only the specified files while preserving the rest of the indexed codebase.`,
+                        inputSchema: {
+                            type: "object",
+                            properties: {
+                                codebasePath: {
+                                    type: "string",
+                                    description: `ABSOLUTE path to the codebase directory (must already be indexed)`
+                                },
+                                paths: {
+                                    oneOf: [
+                                        {
+                                            type: "string",
+                                            description: "Single file path or directory path to update"
+                                        },
+                                        {
+                                            type: "array",
+                                            items: {
+                                                type: "string"
+                                            },
+                                            description: "Array of file paths to update"
+                                        }
+                                    ],
+                                    description: "File path(s) or directory to force re-index (absolute or relative to codebasePath)"
+                                }
+                            },
+                            required: ["codebasePath", "paths"]
+                        }
+                    },
                 ]
             };
         });
@@ -295,6 +325,8 @@ This tool is versatile and can be used before completing various tasks to retrie
                     return await this.toolHandlers.handleClearIndex(args);
                 case "get_indexing_status":
                     return await this.toolHandlers.handleGetIndexingStatus(args);
+                case "update_files":
+                    return await this.toolHandlers.handleUpdateFiles(args);
 
                 default:
                     throw new Error(`Unknown tool: ${name}`);

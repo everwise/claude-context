@@ -2,17 +2,20 @@ import * as fs from "fs";
 import * as path from "path";
 import { Context, COLLECTION_LIMIT_MESSAGE, VERSION } from "@everwise/claude-context-core";
 import { SnapshotManager } from "./snapshot.js";
+import { UpdateFilesHandler } from "./update-files-handler.js";
 import { ensureAbsolutePath, truncateContent, trackCodebasePath, findParentIndexedProject } from "./utils.js";
 
 export class ToolHandlers {
     private context: Context;
     private snapshotManager: SnapshotManager;
+    private updateFilesHandler: UpdateFilesHandler;
     private indexingStats: { indexedFiles: number; totalChunks: number } | null = null;
     private currentWorkspace: string;
 
     constructor(context: Context, snapshotManager: SnapshotManager) {
         this.context = context;
         this.snapshotManager = snapshotManager;
+        this.updateFilesHandler = new UpdateFilesHandler(context, snapshotManager);
         this.currentWorkspace = process.cwd();
         console.log(`[WORKSPACE] Current workspace: ${this.currentWorkspace}`);
     }
@@ -524,25 +527,25 @@ export class ToolHandlers {
 
             // Determine search method based on passed parameters or default configuration
             let searchResults: any[];
-            
+
             // Handle reranking override
             if (rerankingEnabled !== undefined) {
                 console.log(`[SEARCH] 🔄 Reranking override: ${rerankingEnabled ? 'enabled' : 'disabled'} (overriding default configuration)`);
                 console.log(`[SEARCH] ⚠️  Note: Reranking override is currently logged but not fully implemented. The default .env configuration will still be used.`);
             }
-            
+
             // Handle PRF override
             const usePRF = prfEnabled !== undefined ? prfEnabled : !!(this.context as any).prfEngine;
             if (prfEnabled !== undefined) {
                 console.log(`[SEARCH] 🚀 PRF override: ${prfEnabled ? 'enabled' : 'disabled'} (overriding default configuration)`);
             }
-            
+
             // Handle query preprocessing override
             if (queryPreprocessingEnabled !== undefined) {
                 console.log(`[SEARCH] 🔍 Query preprocessing override: ${queryPreprocessingEnabled ? 'enabled' : 'disabled'} (overriding default configuration)`);
                 console.log(`[SEARCH] ⚠️  Note: Query preprocessing override is currently logged but not fully implemented. The default .env configuration will still be used.`);
             }
-            
+
             // Execute search based on PRF configuration
             if (usePRF && (this.context as any).prfEngine) {
                 searchResults = await (this.context as any).semanticSearchWithPRF(
@@ -869,5 +872,9 @@ export class ToolHandlers {
                 isError: true
             };
         }
+    }
+
+    public async handleUpdateFiles(args: any) {
+        return await this.updateFilesHandler.handleUpdateFiles(args);
     }
 }
