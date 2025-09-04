@@ -437,8 +437,8 @@ export class ToolHandlers {
     }
 
     public async handleSearchCode(args: any) {
-        const { path: codebasePath, query, limit = 10, extensionFilter, rerankingEnabled, prfEnabled, queryPreprocessingEnabled } = args;
-        const resultLimit = limit || 10;
+        const { path: codebasePath, query, limit, extensionFilter, rerankingEnabled, prfEnabled, queryPreprocessingEnabled } = args;
+        const resultLimit = limit || 15;
 
         try {
             // Sync indexed codebases from cloud first

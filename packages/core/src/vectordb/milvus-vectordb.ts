@@ -641,7 +641,7 @@ export class MilvusVectorDatabase implements VectorDatabase {
             const rerank_strategy = {
                 strategy: "rrf",
                 params: {
-                    k: 100
+                    k: 60
                 }
             };
 

@@ -716,7 +716,7 @@ export class MilvusRestfulVectorDatabase implements VectorDatabase {
                 outputFields: ["*"],
                 searchParams: {
                     metricType: "BM25",
-                    params: searchRequests[1].param || { "drop_ratio_search": 0.2 }
+                    params: searchRequests[1].param || { "drop_ratio_search": 0.0 }
                 }
             };
 
