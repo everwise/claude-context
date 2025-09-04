@@ -227,7 +227,7 @@ export class EmbeddingCache {
 
         try {
             const countStmt = this.db.prepare('SELECT COUNT(*) as count FROM embeddings');
-            const sizeStmt = this.db.prepare('SELECT SUM(LENGTH(embedding)) as size FROM embeddings');
+            const sizeStmt = this.db.prepare('SELECT page_count * page_size as size FROM pragma_page_count(), pragma_page_size()');
             const rangeStmt = this.db.prepare('SELECT MIN(created_at) as oldest, MAX(created_at) as newest FROM embeddings');
 
             const countResult = countStmt.get() as { count: number };
