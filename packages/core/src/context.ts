@@ -18,6 +18,7 @@ import {
     HybridSearchResult
 } from './vectordb';
 import { SemanticSearchResult } from './types';
+import { getFileTypeWeight } from './utils/file-type-weighting';
 import { BaseReranker, HuggingFaceReranker, RerankingConfig } from './reranking';
 import { SimpleQueryPreprocessor, QueryPreprocessorConfig, PreprocessingResult, PRFEngine, PRFConfig } from './query';
 import { envManager } from './utils/env-manager';
@@ -683,7 +684,7 @@ export class Context {
                 {
                     data: primarySearchQuery,
                     anns_field: "sparse_vector",
-                    param: { "drop_ratio_search": 0.2 },
+                    param: { "drop_ratio_search": 0.0 },
                     limit: topK
                 }
             ];
@@ -692,7 +693,7 @@ export class Context {
             console.log(`[Context] 🔍 Search request 2 (sparse): anns_field="${searchRequests[1].anns_field}", query_text="${primarySearchQuery}", limit=${searchRequests[1].limit}`);
 
             // 3. Execute hybrid search - get more results if cross-encoder reranking is enabled
-            const searchLimit = this.reranker?.isEnabled() ? Math.min(topK * 2, 50) : topK;
+            const searchLimit = this.reranker?.isEnabled() ? Math.min(topK * 3, 50) : topK;
             console.log(`[Context] 🔍 Executing hybrid search with RRF reranking (limit: ${searchLimit})...`);
 
             // Update search requests with higher limits if reranking is enabled
@@ -716,28 +717,39 @@ export class Context {
 
             console.log(`[Context] 🔍 Raw hybrid search results count: ${searchResults.length}`);
 
-            // 4. Apply cross-encoder reranking if enabled (after Milvus RRF reranking)
-            let finalSearchResults: HybridSearchResult[] | VectorSearchResult[] = searchResults;
-            if (this.reranker?.isEnabled() && searchResults.length > 0) {
-                console.log(`[Context] 🔄 Applying cross-encoder reranking to ${searchResults.length} hybrid results...`);
+            // Apply file type weighting to prioritize implementation files over test files
+            const weightedResults = searchResults.map(result => ({
+                ...result,
+                score: result.score * getFileTypeWeight(
+                    result.document.relativePath,
+                    result.document.fileExtension
+                )
+            })).sort((a, b) => b.score - a.score);
+
+            console.log(`[Context] 🔍 Applied file type weighting, re-sorted ${weightedResults.length} results`);
+
+            // 4. Apply cross-encoder reranking if enabled (after file type weighting)
+            let finalSearchResults: HybridSearchResult[] | VectorSearchResult[] = weightedResults;
+            if (this.reranker?.isEnabled() && weightedResults.length > 0) {
+                console.log(`[Context] 🔄 Applying cross-encoder reranking to ${weightedResults.length} weighted results...`);
                 try {
                     await this.reranker.initialize(); // Lazy initialization
 
                     // Convert HybridSearchResult[] to VectorSearchResult[] for reranker
-                    const vectorResults: VectorSearchResult[] = searchResults.map(result => ({
+                    const vectorResults: VectorSearchResult[] = weightedResults.map(result => ({
                         document: result.document,
                         score: result.score
                     }));
 
                     const rerankedResults = await this.reranker.rerank(primarySearchQuery, vectorResults, topK);
                     finalSearchResults = rerankedResults;
-                    console.log(`[Context] ✅ Cross-encoder reranking completed: ${searchResults.length} → ${finalSearchResults.length} results`);
+                    console.log(`[Context] ✅ Cross-encoder reranking completed: ${weightedResults.length} → ${finalSearchResults.length} results`);
                 } catch (error: any) {
-                    console.warn(`[Context] ⚠️  Cross-encoder reranking failed, using RRF results:`, error.message);
-                    finalSearchResults = searchResults.slice(0, topK);
+                    console.warn(`[Context] ⚠️  Cross-encoder reranking failed, using weighted results:`, error.message);
+                    finalSearchResults = weightedResults.slice(0, topK);
                 }
             } else {
-                finalSearchResults = searchResults.slice(0, topK);
+                finalSearchResults = weightedResults.slice(0, topK);
             }
 
             // 5. Convert to semantic search result format
