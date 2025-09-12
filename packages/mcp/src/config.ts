@@ -75,6 +75,8 @@ export interface CodebaseInfoIndexed extends CodebaseInfoBase {
     indexedFiles: number;        // Number of files indexed
     totalChunks: number;         // Total number of chunks generated
     indexStatus: 'completed' | 'limit_reached';  // Status from indexing result
+    lastSyncStart?: string;      // Optional: timestamp when last sync started (for coordination)
+    lastSynced?: string;         // Optional: timestamp when last sync completed (for cooldown)
 }
 
 // Index failed state - when indexing failed
@@ -298,6 +300,7 @@ export function createMcpConfig(): ContextMcpConfig {
     console.log(`[DEBUG]   UPDATE_CHECK_INTERVAL: ${envManager.get('UPDATE_CHECK_INTERVAL') || 'NOT SET'}`);
     console.log(`[DEBUG]   UPDATE_SOURCE: ${envManager.get('UPDATE_SOURCE') || 'NOT SET'}`);
     console.log(`[DEBUG]   NODE_ENV: ${envManager.get('NODE_ENV') || 'NOT SET'}`);
+    console.log(`[DEBUG]   SYNC_TIMEOUT_MINUTES: ${envManager.get('SYNC_TIMEOUT_MINUTES') || 'NOT SET'}`);
 
     const prfConfig = getPRFConfig();
     const queryPreprocessingConfig = getQueryPreprocessingConfig();
@@ -488,6 +491,9 @@ Environment Variables:
   AUTO_UPDATE             Enable/disable auto-updates: true, false (default: true)
   UPDATE_CHECK_INTERVAL   Update check interval in milliseconds (default: 3600000 = 1 hour)
   UPDATE_SOURCE           Update source: github-packages, github-releases (default: github-packages)
+
+  Sync Coordination Configuration:
+  SYNC_TIMEOUT_MINUTES    Timeout for sync operations in minutes, after which they're considered stale (default: 2)
 
 Examples:
   # Start MCP server with OpenAI (default) and explicit Milvus address

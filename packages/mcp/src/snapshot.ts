@@ -503,4 +503,261 @@ export class SnapshotManager {
             console.error('[SNAPSHOT-DEBUG] Error saving snapshot:', error);
         }
     }
-} 
+
+    /**
+     * Save snapshot using atomic file operations (write to temp file, then rename)
+     * Used for sync operations to prevent corruption during concurrent access
+     */
+    public saveCodebaseSnapshotAtomic(): void {
+        console.log('[SNAPSHOT-DEBUG] Saving codebase snapshot atomically to:', this.snapshotFilePath);
+
+        try {
+            // Ensure directory exists
+            const snapshotDir = path.dirname(this.snapshotFilePath);
+            if (!fs.existsSync(snapshotDir)) {
+                fs.mkdirSync(snapshotDir, { recursive: true });
+                console.log('[SNAPSHOT-DEBUG] Created snapshot directory:', snapshotDir);
+            }
+
+            // Build v2 format snapshot using the complete info map
+            const codebases: Record<string, CodebaseInfo> = Object.fromEntries(this.codebaseInfoMap);
+
+            const snapshot: CodebaseSnapshotV2 = {
+                formatVersion: 'v2',
+                codebases: codebases,
+                lastUpdated: new Date().toISOString()
+            };
+
+            // Write to temporary file first
+            const tempFilePath = `${this.snapshotFilePath}.tmp.${Date.now()}`;
+            fs.writeFileSync(tempFilePath, JSON.stringify(snapshot, null, 2));
+
+            // Atomically rename temp file to actual snapshot file
+            fs.renameSync(tempFilePath, this.snapshotFilePath);
+
+            const indexedCount = this.indexedCodebases.length;
+            const indexingCount = this.indexingCodebases.size;
+            const failedCount = this.getFailedCodebases().length;
+
+            console.log(`[SNAPSHOT-DEBUG] Snapshot saved atomically in v2 format. Indexed: ${indexedCount}, Indexing: ${indexingCount}, Failed: ${failedCount}`);
+
+        } catch (error: any) {
+            console.error('[SNAPSHOT-DEBUG] Error saving snapshot atomically:', error);
+            // Clean up temp files if they exist
+            const snapshotDir = path.dirname(this.snapshotFilePath);
+            const snapshotBase = path.basename(this.snapshotFilePath);
+            
+            fs.readdirSync(snapshotDir)
+                .filter(file => file.startsWith(`${snapshotBase}.tmp.`))
+                .forEach(tempFile => {
+                    try {
+                        fs.unlinkSync(path.join(snapshotDir, tempFile));
+                    } catch (cleanupError) {
+                        console.warn('[SNAPSHOT-DEBUG] Error cleaning up temp file:', cleanupError);
+                    }
+                });
+        }
+    }
+
+    /**
+     * Reload snapshot from disk to get the latest state (critical for multi-process coordination)
+     * Assumes v2 format since initial load always migrates v1 to v2
+     */
+    public reloadFromDisk(): void {
+        try {
+            if (!fs.existsSync(this.snapshotFilePath)) {
+                return;
+            }
+
+            const snapshotData = fs.readFileSync(this.snapshotFilePath, 'utf8');
+            const snapshot: CodebaseSnapshotV2 = JSON.parse(snapshotData);
+
+            this.loadV2Format(snapshot);
+        } catch (error) {
+            console.warn('[SYNC-COORDINATION] Error reloading snapshot from disk:', error);
+        }
+    }
+
+    /**
+     * Start sync for a codebase. Returns false if sync is already active.
+     * Always reload snapshot from disk first to get latest state.
+     */
+    public startSync(codebasePath: string, skipReload: boolean = false): boolean {
+        // Reload from disk first to get latest state (unless skipped for performance)
+        if (!skipReload) {
+            this.reloadFromDisk();
+        }
+
+        const info = this.codebaseInfoMap.get(codebasePath);
+        if (!info || info.status !== 'indexed') {
+            console.log(`[SYNC-COORDINATION] Cannot start sync for non-indexed codebase: ${codebasePath}`);
+            return false;
+        }
+
+        // Check if sync is already active
+        if (info.lastSyncStart) {
+            console.log(`[SYNC-COORDINATION] Sync already active for codebase ${codebasePath}, started at ${info.lastSyncStart}`);
+            return false;
+        }
+
+        // Set sync start timestamp
+        const updatedInfo: CodebaseInfoIndexed = {
+            ...info,
+            lastSyncStart: new Date().toISOString()
+        };
+
+        this.codebaseInfoMap.set(codebasePath, updatedInfo);
+        this.saveCodebaseSnapshotAtomic();
+
+        console.log(`[SYNC-COORDINATION] Started sync for codebase ${codebasePath} at ${updatedInfo.lastSyncStart}`);
+        return true;
+    }
+
+    /**
+     * Complete sync for a codebase, clearing lastSyncStart and setting lastSynced timestamp
+     */
+    public completeSync(codebasePath: string): void {
+        // Always reload from disk first to get latest state
+        this.reloadFromDisk();
+
+        const info = this.codebaseInfoMap.get(codebasePath);
+        if (!info || info.status !== 'indexed') {
+            console.log(`[SYNC-COORDINATION] Cannot complete sync for non-indexed codebase: ${codebasePath}`);
+            return;
+        }
+
+        const updatedInfo: CodebaseInfoIndexed = {
+            ...info,
+            lastSyncStart: undefined,
+            lastSynced: new Date().toISOString()
+        };
+
+        this.codebaseInfoMap.set(codebasePath, updatedInfo);
+        this.saveCodebaseSnapshotAtomic();
+
+        console.log(`[SYNC-COORDINATION] Completed sync for codebase ${codebasePath} at ${updatedInfo.lastSynced}`);
+    }
+
+    /**
+     * Claim multiple codebases for sync at once to prevent race conditions
+     */
+    public claimCodebasesForSync(codebasePaths: string[]): string[] {
+        this.reloadFromDisk(); // Get fresh state
+
+        const claimedPaths: string[] = [];
+        const now = new Date().toISOString();
+
+        for (const codebasePath of codebasePaths) {
+            const info = this.codebaseInfoMap.get(codebasePath);
+            if (!info || info.status !== 'indexed') {
+                continue;
+            }
+
+            // Skip if already claimed
+            if (info.lastSyncStart) {
+                console.log(`[SYNC-COORDINATION] Codebase ${codebasePath} already claimed`);
+                continue;
+            }
+
+            // Claim it
+            const updatedInfo: CodebaseInfoIndexed = {
+                ...info,
+                lastSyncStart: now
+            };
+            this.codebaseInfoMap.set(codebasePath, updatedInfo);
+            claimedPaths.push(codebasePath);
+        }
+
+        if (claimedPaths.length > 0) {
+            this.saveCodebaseSnapshotAtomic();
+            console.log(`[SYNC-COORDINATION] Claimed ${claimedPaths.length} codebases for sync`);
+        }
+
+        return claimedPaths;
+    }
+
+    /**
+     * Release any unclaimed codebases (for graceful shutdown)
+     */
+    public releaseUnclaimedCodebases(claimedPaths: string[]): void {
+        this.reloadFromDisk(); // Get fresh state
+
+        let releasedCount = 0;
+
+        for (const codebasePath of claimedPaths) {
+            const info = this.codebaseInfoMap.get(codebasePath);
+            if (!info || info.status !== 'indexed') {
+                continue;
+            }
+
+            // If still has lastSyncStart, release it
+            if (info.lastSyncStart) {
+                const updatedInfo: CodebaseInfoIndexed = {
+                    ...info,
+                    lastSyncStart: undefined
+                };
+                this.codebaseInfoMap.set(codebasePath, updatedInfo);
+                releasedCount++;
+            }
+        }
+
+        if (releasedCount > 0) {
+            this.saveCodebaseSnapshotAtomic();
+            console.log(`[SYNC-COORDINATION] Released ${releasedCount} unclaimed codebases`);
+        }
+    }
+
+    /**
+     * Check if sync should be performed based on cooldown and timeout settings
+     * Always reload snapshot from disk first to get latest state.
+     */
+    public shouldSync(codebasePath: string, cooldownMinutes: number, timeoutMinutes: number, skipReload: boolean = false): boolean {
+        // Reload from disk first to get latest state (unless skipped for performance)
+        if (!skipReload) {
+            this.reloadFromDisk();
+        }
+
+        const info = this.codebaseInfoMap.get(codebasePath);
+        if (!info || info.status !== 'indexed') {
+            console.log(`[SYNC-COORDINATION] Codebase not indexed, cannot sync: ${codebasePath}`);
+            return false;
+        }
+
+        const now = Date.now();
+
+        // Check if sync is currently active and has timed out
+        if (info.lastSyncStart) {
+            const syncStartTime = new Date(info.lastSyncStart).getTime();
+            const timeoutMs = timeoutMinutes * 60 * 1000;
+
+            if (now - syncStartTime < timeoutMs) {
+                console.log(`[SYNC-COORDINATION] Sync already active for ${codebasePath}, started ${Math.round((now - syncStartTime) / 1000)}s ago`);
+                return false;
+            } else {
+                console.log(`[SYNC-COORDINATION] Sync for ${codebasePath} has timed out (started ${Math.round((now - syncStartTime) / 1000)}s ago), allowing new sync`);
+                // Clear the timed out sync start timestamp
+                const updatedInfo: CodebaseInfoIndexed = {
+                    ...info,
+                    lastSyncStart: undefined
+                };
+                this.codebaseInfoMap.set(codebasePath, updatedInfo);
+                this.saveCodebaseSnapshotAtomic();
+            }
+        }
+
+        // Check cooldown period based on last completed sync
+        if (info.lastSynced) {
+            const lastSyncTime = new Date(info.lastSynced).getTime();
+            const cooldownMs = cooldownMinutes * 60 * 1000;
+
+            if (now - lastSyncTime < cooldownMs) {
+                const remainingCooldownS = Math.round((cooldownMs - (now - lastSyncTime)) / 1000);
+                console.log(`[SYNC-COORDINATION] Codebase ${codebasePath} still in cooldown period, ${remainingCooldownS}s remaining`);
+                return false;
+            }
+        }
+
+        console.log(`[SYNC-COORDINATION] Sync allowed for codebase ${codebasePath}`);
+        return true;
+    }
+}
