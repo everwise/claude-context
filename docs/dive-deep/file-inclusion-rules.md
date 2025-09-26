@@ -91,12 +91,13 @@ See [Environment Variables](../getting-started/environment-variables.md) for mor
 ### 4. .gitignore Files
 Standard Git ignore patterns in codebase root.
 
-### 5. .xxxignore Files
-Any file in codebase root matching pattern `.xxxignore`:
-- `.cursorignore`
-- `.codeiumignore` 
-- `.contextignore`
-- etc.
+### 5. Code Analysis Ignore Files
+Specific ignore files in codebase root relevant to code search:
+- `.contextignore` - Claude Context specific ignores
+- `.cursorignore` - Cursor AI editor ignores
+- `.codeiumignore` - Codeium AI ignores
+
+Note: Other ignore files like `.dockerignore`, `.npmignore`, `.eslintignore` are NOT respected as they're specific to build/deployment tools, not code analysis.
 
 ### 6. Global .contextignore
 User-wide patterns in `~/.context/.contextignore`.

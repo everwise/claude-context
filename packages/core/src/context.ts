@@ -1555,10 +1555,16 @@ export class Context {
             const entries = await fs.promises.readdir(codebasePath, { withFileTypes: true });
             const ignoreFiles: string[] = [];
 
+            // Only respect ignore files relevant to code search/analysis
+            const relevantIgnoreFiles = [
+                '.gitignore',      // Version control ignores
+                '.contextignore',  // This tool's specific ignores
+                '.cursorignore',   // Cursor AI editor ignores
+                '.codeiumignore'   // Codeium AI ignores
+            ];
+
             for (const entry of entries) {
-                if (entry.isFile() &&
-                    entry.name.startsWith('.') &&
-                    entry.name.endsWith('ignore')) {
+                if (entry.isFile() && relevantIgnoreFiles.includes(entry.name)) {
                     ignoreFiles.push(path.join(codebasePath, entry.name));
                 }
             }
