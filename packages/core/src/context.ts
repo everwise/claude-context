@@ -337,7 +337,33 @@ export class Context {
             return { indexedFiles: 0, totalChunks: 0, status: 'completed' };
         }
 
-        // 3. Process each file with streaming chunk processing
+        // 3. Smart behavior: try incremental update first (unless force reindex)
+        if (!forceReindex && await this.hasIndex(codebasePath)) {
+            console.log('[Context] 🧠 Existing index found, attempting smart update...');
+            progressCallback?.({ phase: 'Checking for changes...', current: 8, total: 100, percentage: 8 });
+
+            try {
+                const smartResult = await this.reindexByChange(codebasePath, progressCallback);
+                const totalSmartChanges = smartResult.added + smartResult.removed + smartResult.modified;
+
+                if (totalSmartChanges > 0) {
+                    console.log(`[Context] ✨ Smart update completed: +${smartResult.added}, -${smartResult.removed}, ~${smartResult.modified} files`);
+                } else {
+                    console.log('[Context] ✨ Smart update completed: no changes detected');
+                }
+
+                return {
+                    indexedFiles: smartResult.added + smartResult.modified,
+                    totalChunks: 0, // reindexByChange doesn't return chunk count
+                    status: 'completed'
+                };
+            } catch (error) {
+                console.warn('[Context] ⚠️ Smart update failed, falling back to full index:', error);
+                // Continue with full indexing below
+            }
+        }
+
+        // 4. Process each file with streaming chunk processing
         // Reserve 10% for preparation, 90% for actual indexing
         const indexingStartPercentage = 10;
         const indexingEndPercentage = 100;
