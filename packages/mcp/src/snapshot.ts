@@ -95,7 +95,6 @@ export class SnapshotManager {
         console.log('[SNAPSHOT-DEBUG] Loading v2 format snapshot');
 
         const validIndexedCodebases: string[] = [];
-        const validIndexingCodebases = new Map<string, number>();
         const validFileCount = new Map<string, number>();
         const validCodebaseInfoMap = new Map<string, CodebaseInfo>();
 
@@ -115,11 +114,16 @@ export class SnapshotManager {
                 }
                 console.log(`[SNAPSHOT-DEBUG] Validated indexed codebase: ${codebasePath} (${info.indexedFiles || 'unknown'} files, ${info.totalChunks || 'unknown'} chunks)`);
             } else if (info.status === 'indexing') {
-                if ('indexingPercentage' in info) {
-                    validIndexingCodebases.set(codebasePath, info.indexingPercentage);
-                }
-                console.warn(`[SNAPSHOT-DEBUG] Found interrupted indexing codebase: ${codebasePath} (${info.indexingPercentage || 0}%). Treating as not indexed.`);
-                // Don't add to indexed - treat interrupted indexing as not indexed
+                // Convert interrupted indexing to failed state for recovery
+                const interruptedInfo = {
+                    ...info,
+                    status: 'indexfailed' as const,
+                    errorMessage: `Indexing interrupted at ${(info as any).indexingPercentage || 0}%`,
+                    lastAttemptedPercentage: (info as any).indexingPercentage || 0
+                };
+                validCodebaseInfoMap.set(codebasePath, interruptedInfo);
+                console.warn(`[SNAPSHOT-DEBUG] Found interrupted indexing codebase: ${codebasePath} (${(info as any).indexingPercentage || 0}%). Converting to failed state for retry.`);
+                // Don't add to indexed or indexing - treat interrupted indexing as failed
             } else if (info.status === 'indexfailed') {
                 console.warn(`[SNAPSHOT-DEBUG] Found failed indexing codebase: ${codebasePath}. Error: ${info.errorMessage}`);
                 // Failed indexing codebases are not added to indexed or indexing lists
