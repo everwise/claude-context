@@ -161,7 +161,8 @@ export class AstCodeSplitter implements Splitter {
         traverse(node);
 
         // If no meaningful chunks found, create a single chunk with the entire code
-        if (chunks.length === 0) {
+        // CRITICAL FIX: Only create chunk if code has content (prevent empty file chunks)
+        if (chunks.length === 0 && code.trim().length > 0) {
             chunks.push({
                 content: code,
                 metadata: {

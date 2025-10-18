@@ -1404,17 +1404,36 @@ export class Context {
         try {
             console.log(`[DEBUG-PROCESS] Starting processChunkBatch with ${chunks.length} chunks, isHybrid=${isHybrid}`);
 
+            // CRITICAL FIX: Filter out empty/whitespace-only chunks to prevent Ollama crashes
+            const validChunks = chunks.filter(chunk => {
+                const trimmed = chunk.content.trim();
+                if (trimmed.length === 0) {
+                    console.warn(`[Context] ⚠️ Skipping empty chunk from ${chunk.metadata.filePath} at lines ${chunk.metadata.startLine}-${chunk.metadata.endLine}`);
+                    return false;
+                }
+                return true;
+            });
+
+            if (validChunks.length === 0) {
+                console.warn(`[Context] ⚠️ All chunks in batch were empty, skipping embedding generation`);
+                return;
+            }
+
+            if (validChunks.length < chunks.length) {
+                console.log(`[Context] 🔄 Filtered ${chunks.length - validChunks.length} empty chunks, processing ${validChunks.length} valid chunks`);
+            }
+
             // Generate embedding vectors using cache-aware logic
-            const chunkContents = chunks.map(chunk => chunk.content);
+            const chunkContents = validChunks.map(chunk => chunk.content);
             const embeddings = await this.getCachedOrGenerateEmbeddings(chunkContents);
 
             console.log(`[DEBUG-PROCESS] Retrieved ${embeddings.length} embeddings`);
 
             if (isHybrid === true) {
-                console.log(`[DEBUG-PROCESS] Creating hybrid documents for ${chunks.length} chunks with ${embeddings.length} embeddings`);
+                console.log(`[DEBUG-PROCESS] Creating hybrid documents for ${validChunks.length} chunks with ${embeddings.length} embeddings`);
 
                 // Create hybrid vector documents
-                const documents: VectorDocument[] = chunks.map((chunk, index) => {
+                const documents: VectorDocument[] = validChunks.map((chunk, index) => {
                     if (!chunk.metadata.filePath) {
                         throw new Error(`Missing filePath in chunk metadata at index ${index}`);
                     }
@@ -1446,7 +1465,7 @@ export class Context {
                 console.log(`[DEBUG-PROCESS] insertHybrid completed successfully`);
             } else {
                 // Create regular vector documents
-                const documents: VectorDocument[] = chunks.map((chunk, index) => {
+                const documents: VectorDocument[] = validChunks.map((chunk, index) => {
                     if (!chunk.metadata.filePath) {
                         throw new Error(`Missing filePath in chunk metadata at index ${index}`);
                     }
