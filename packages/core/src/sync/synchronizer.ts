@@ -221,6 +221,25 @@ export class FileSynchronizer {
         console.log(`[Synchronizer] File synchronizer initialized. Loaded ${this.fileHashes.size} file hashes.`);
     }
 
+    /**
+     * Check if this synchronizer has a valid snapshot (i.e., has file hashes)
+     */
+    public hasValidSnapshot(): boolean {
+        return this.fileHashes.size > 0;
+    }
+
+    /**
+     * Generate initial file hashes for a fresh indexing
+     * This should be called after successful indexing to establish the baseline
+     */
+    public async generateAndSaveInitialSnapshot(): Promise<void> {
+        console.log(`[Synchronizer] Generating initial snapshot for ${this.rootDir}`);
+        this.fileHashes = await this.generateFileHashes(this.rootDir);
+        this.merkleDAG = this.buildMerkleDAG(this.fileHashes);
+        await this.saveSnapshot();
+        console.log(`[Synchronizer] Initial snapshot saved with ${this.fileHashes.size} file hashes`);
+    }
+
     public async checkForChanges(): Promise<{ added: string[], removed: string[], modified: string[] }> {
         console.log('[Synchronizer] Checking for file changes...');
 
@@ -313,10 +332,10 @@ export class FileSynchronizer {
             console.log(`Loaded snapshot from ${this.snapshotPath}`);
         } catch (error: any) {
             if (error.code === 'ENOENT') {
-                console.log(`Snapshot file not found at ${this.snapshotPath}. Generating new one.`);
-                this.fileHashes = await this.generateFileHashes(this.rootDir);
-                this.merkleDAG = this.buildMerkleDAG(this.fileHashes);
-                await this.saveSnapshot();
+                console.log(`Snapshot file not found at ${this.snapshotPath}. Will generate after successful indexing.`);
+                // Initialize with empty state - snapshot will be saved after successful indexing
+                this.fileHashes = new Map();
+                this.merkleDAG = new MerkleDAG();
             } else {
                 throw error;
             }

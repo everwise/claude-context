@@ -388,6 +388,17 @@ export class Context {
 
         console.log(`[Context] ✅ Codebase indexing completed! Processed ${result.processedFiles} files in total, generated ${result.totalChunks} code chunks`);
 
+        // CRITICAL FIX: Save Merkle DAG snapshot after successful full indexing
+        // This establishes the baseline for future smart updates
+        const collectionName = this.getCollectionName(codebasePath);
+        const synchronizer = this.synchronizers.get(collectionName);
+        if (synchronizer && result.processedFiles > 0) {
+            console.log('[Context] 💾 Saving Merkle DAG snapshot after successful full indexing...');
+            await synchronizer.generateAndSaveInitialSnapshot();
+        } else if (!synchronizer) {
+            console.warn('[Context] ⚠️ No synchronizer found to save snapshot - this may cause issues with smart updates');
+        }
+
         progressCallback?.({
             phase: 'Indexing complete!',
             current: result.processedFiles,
@@ -422,13 +433,38 @@ export class Context {
 
         const currentSynchronizer = this.synchronizers.get(collectionName)!;
 
+        // CRITICAL FIX: Check if synchronizer has a valid snapshot AND collection has data
+        // If no valid snapshot exists, this is a fresh index - skip smart update
+        if (!currentSynchronizer.hasValidSnapshot()) {
+            console.log('[Context] 🔍 No existing snapshot found - this is a fresh index, skipping smart update');
+            throw new Error('No snapshot - perform full index');
+        }
+
+        // CRITICAL FIX: Verify Milvus collection actually has data before concluding "no changes"
+        progressCallback?.({ phase: 'Validating existing index...', current: 0, total: 100, percentage: 0 });
+        let collectionHasData = false;
+        try {
+            const stats = await this.vectorDatabase.query(collectionName, '', ['id'], 1);
+            collectionHasData = stats && stats.length > 0;
+            console.log(`[Context] 🔍 Collection validation: ${collectionHasData ? 'has data' : 'EMPTY'}`);
+        } catch (error) {
+            console.warn(`[Context] ⚠️ Failed to query collection for validation:`, error);
+            // Assume collection doesn't have data if query fails
+            collectionHasData = false;
+        }
+
+        if (!collectionHasData) {
+            console.warn(`[Context] ⚠️ Collection ${collectionName} exists but is EMPTY despite having snapshot. Forcing full re-index.`);
+            throw new Error('Collection is empty - perform full index');
+        }
+
         progressCallback?.({ phase: 'Checking for file changes...', current: 0, total: 100, percentage: 0 });
         const { added, removed, modified } = await currentSynchronizer.checkForChanges();
         const totalChanges = added.length + removed.length + modified.length;
 
         if (totalChanges === 0) {
             progressCallback?.({ phase: 'No changes detected', current: 100, total: 100, percentage: 100 });
-            console.log('[Context] ✅ No file changes detected.');
+            console.log('[Context] ✅ No file changes detected and collection has data.');
             return { added: 0, removed: 0, modified: 0 };
         }
 
@@ -469,6 +505,7 @@ export class Context {
         console.log(`[Context] ✅ Re-indexing complete. Added: ${added.length}, Removed: ${removed.length}, Modified: ${modified.length}`);
         progressCallback?.({ phase: 'Re-indexing complete!', current: totalChanges, total: totalChanges, percentage: 100 });
 
+        // Note: Snapshot is already saved by checkForChanges() when changes are detected
         return { added: added.length, removed: removed.length, modified: modified.length };
     }
 
