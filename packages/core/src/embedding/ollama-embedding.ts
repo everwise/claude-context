@@ -76,16 +76,42 @@ export class OllamaEmbedding extends Embedding {
             embedOptions.keep_alive = this.config.keepAlive;
         }
 
-        const response = await this.client.embed(embedOptions);
+        // Retry with exponential backoff (following milvus-vectordb.ts pattern)
+        const maxRetries = 3;
+        const initialInterval = 1000; // 1 second
+        const backoffMultiplier = 2;
+        let attempt = 1;
+        let interval = initialInterval;
 
-        if (!response.embeddings || !response.embeddings[0]) {
-            throw new Error('Ollama API returned invalid response');
+        while (attempt <= maxRetries) {
+            try {
+                const response = await this.client.embed(embedOptions);
+
+                if (!response.embeddings || !response.embeddings[0]) {
+                    throw new Error('Ollama API returned invalid response');
+                }
+
+                return {
+                    vector: response.embeddings[0],
+                    dimension: this.dimension
+                };
+            } catch (error) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                console.error(`[OllamaEmbedding] ❌ Single embedding failed on attempt ${attempt}/${maxRetries}: ${errorMessage}`);
+
+                if (attempt === maxRetries) {
+                    throw new Error(`Failed to generate embedding after ${maxRetries} attempts: ${errorMessage}`);
+                }
+
+                console.log(`[OllamaEmbedding] ⏳ Retrying embedding in ${interval}ms...`);
+                await new Promise(resolve => setTimeout(resolve, interval));
+                interval *= backoffMultiplier;
+                attempt++;
+            }
         }
 
-        return {
-            vector: response.embeddings[0],
-            dimension: this.dimension
-        };
+        // TypeScript requires a return statement here, though it's unreachable
+        throw new Error('Unreachable code');
     }
 
     async embedBatch(texts: string[]): Promise<EmbeddingVector[]> {
@@ -99,7 +125,7 @@ export class OllamaEmbedding extends Embedding {
             console.log(`[OllamaEmbedding] 📏 Detected Ollama embedding dimension: ${this.dimension} for model: ${this.config.model}`);
         }
 
-        // Use Ollama's native batch embedding API
+        // Use Ollama's native batch embedding API with retry logic
         const embedOptions: any = {
             model: this.config.model,
             input: processedTexts, // Pass array directly to Ollama
@@ -111,17 +137,43 @@ export class OllamaEmbedding extends Embedding {
             embedOptions.keep_alive = this.config.keepAlive;
         }
 
-        const response = await this.client.embed(embedOptions);
+        // Retry with exponential backoff (following milvus-vectordb.ts pattern)
+        const maxRetries = 3;
+        const initialInterval = 1000; // 1 second
+        const backoffMultiplier = 2;
+        let attempt = 1;
+        let interval = initialInterval;
 
-        if (!response.embeddings || !Array.isArray(response.embeddings)) {
-            throw new Error('Ollama API returned invalid batch response');
+        while (attempt <= maxRetries) {
+            try {
+                const response = await this.client.embed(embedOptions);
+
+                if (!response.embeddings || !Array.isArray(response.embeddings)) {
+                    throw new Error('Ollama API returned invalid batch response');
+                }
+
+                // Convert to EmbeddingVector format
+                return response.embeddings.map((embedding: number[]) => ({
+                    vector: embedding,
+                    dimension: this.dimension
+                }));
+            } catch (error) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                console.error(`[OllamaEmbedding] ❌ Batch embedding failed on attempt ${attempt}/${maxRetries}: ${errorMessage}`);
+
+                if (attempt === maxRetries) {
+                    throw new Error(`Failed to generate batch embeddings after ${maxRetries} attempts: ${errorMessage}`);
+                }
+
+                console.log(`[OllamaEmbedding] ⏳ Retrying batch embedding in ${interval}ms...`);
+                await new Promise(resolve => setTimeout(resolve, interval));
+                interval *= backoffMultiplier;
+                attempt++;
+            }
         }
 
-        // Convert to EmbeddingVector format
-        return response.embeddings.map((embedding: number[]) => ({
-            vector: embedding,
-            dimension: this.dimension
-        }));
+        // TypeScript requires a return statement here, though it's unreachable
+        throw new Error('Unreachable code');
     }
 
     getDimension(): number {

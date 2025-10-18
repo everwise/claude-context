@@ -1119,11 +1119,22 @@ export class Context {
         const collectionExists = await this.vectorDatabase.hasCollection(collectionName);
 
         if (collectionExists && !forceReindex) {
-            console.log(`📋 Collection ${collectionName} already exists, skipping creation`);
-            return;
-        }
+            // CRITICAL FIX: Check for partial/corrupted indexes
+            // If collection exists but has no valid snapshot, it's likely from a failed indexing
+            const synchronizer = this.synchronizers.get(collectionName);
+            const hasValidSnapshot = synchronizer?.hasValidSnapshot() ?? false;
 
-        if (collectionExists && forceReindex) {
+            if (!hasValidSnapshot) {
+                console.warn(`[Context] ⚠️ Collection ${collectionName} exists but has no valid snapshot - likely a partial/failed index`);
+                console.log(`[Context] 🗑️  Dropping corrupted collection to prevent duplicate data...`);
+                await this.vectorDatabase.dropCollection(collectionName);
+                console.log(`[Context] ✅ Corrupted collection dropped, will recreate fresh index`);
+                // Continue to collection creation below
+            } else {
+                console.log(`📋 Collection ${collectionName} already exists with valid snapshot, skipping creation`);
+                return;
+            }
+        } else if (collectionExists && forceReindex) {
             console.log(`[Context] 🗑️  Dropping existing collection ${collectionName} for force reindex...`);
             await this.vectorDatabase.dropCollection(collectionName);
             console.log(`[Context] ✅ Collection ${collectionName} dropped successfully`);
