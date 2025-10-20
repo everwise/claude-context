@@ -1231,9 +1231,12 @@ export class Context {
         onFileProcessed?: (filePath: string, fileIndex: number, totalFiles: number) => void
     ): Promise<{ processedFiles: number; totalChunks: number; status: 'completed' | 'limit_reached' }> {
         const isHybrid = this.getIsHybrid();
+
+        // Batch size for embedding processing
         const EMBEDDING_BATCH_SIZE = Math.max(1, parseInt(envManager.get('EMBEDDING_BATCH_SIZE') || '100', 10));
+        console.log(`[Context] 🔧 Using batch size: ${EMBEDDING_BATCH_SIZE}`);
+
         const CHUNK_LIMIT = 450000;
-        console.log(`[Context] 🔧 Using EMBEDDING_BATCH_SIZE: ${EMBEDDING_BATCH_SIZE}`);
 
         let chunkBuffer: Array<{ chunk: CodeChunk; codebasePath: string }> = [];
         let processedFiles = 0;
@@ -1336,14 +1339,71 @@ export class Context {
     }
 
     /**
+     * Detect if error is a connection/EOF error that might be resolved by smaller batches
+     */
+    private isConnectionError(error: Error): boolean {
+        const errorMessage = error.message.toLowerCase();
+        return (
+            errorMessage.includes('eof') ||
+            errorMessage.includes('econnreset') ||
+            errorMessage.includes('socket hang up') ||
+            (errorMessage.includes('connection') && errorMessage.includes('reset')) ||
+            errorMessage.includes('fetch failed')
+        );
+    }
+
+    /**
+     * Adaptive batch embedding with automatic retry on smaller batches
+     * @param contents Array of text contents to embed
+     * @param minBatchSize Minimum batch size before giving up (default: 5)
+     * @returns Array of embedding vectors
+     */
+    private async embedBatchAdaptive(
+        contents: string[],
+        minBatchSize: number = 5
+    ): Promise<EmbeddingVector[]> {
+        try {
+            // Try with the full batch
+            return await this.embedding.embedBatch(contents);
+        } catch (error) {
+            if (!(error instanceof Error) || !this.isConnectionError(error)) {
+                // Not a connection error, re-throw
+                throw error;
+            }
+
+            // Connection error - try splitting the batch
+            if (contents.length <= minBatchSize) {
+                // Already at minimum batch size, can't split further
+                console.error(`[Context] ❌ Failed to embed batch of ${contents.length} chunks even at minimum batch size`);
+                throw error;
+            }
+
+            // Split batch in half and retry
+            const midpoint = Math.floor(contents.length / 2);
+            const firstHalf = contents.slice(0, midpoint);
+            const secondHalf = contents.slice(midpoint);
+
+            console.warn(`[Context] ⚠️  Batch embedding failed (${error.message}), splitting ${contents.length} chunks into ${firstHalf.length} + ${secondHalf.length}`);
+
+            // Recursively process both halves
+            const [firstResults, secondResults] = await Promise.all([
+                this.embedBatchAdaptive(firstHalf, minBatchSize),
+                this.embedBatchAdaptive(secondHalf, minBatchSize)
+            ]);
+
+            return [...firstResults, ...secondResults];
+        }
+    }
+
+    /**
      * Get cached embeddings or generate new ones
      * @param chunkContents Array of chunk content strings
      * @returns Array of embedding vectors
      */
     private async getCachedOrGenerateEmbeddings(chunkContents: string[]): Promise<EmbeddingVector[]> {
         if (!this.embeddingCache.isAvailable()) {
-            // Cache not available, use regular embedding generation
-            return await this.embedding.embedBatch(chunkContents);
+            // Cache not available, use adaptive embedding generation
+            return await this.embedBatchAdaptive(chunkContents);
         }
 
         // Generate content hashes for all chunks
@@ -1372,7 +1432,7 @@ export class Context {
         // Generate embeddings for uncached chunks
         if (uncachedContents.length > 0) {
             console.log(`[Context] 🔄 Cache miss for ${uncachedContents.length}/${chunkContents.length} chunks, generating embeddings...`);
-            const newEmbeddings = await this.embedding.embedBatch(uncachedContents);
+            const newEmbeddings = await this.embedBatchAdaptive(uncachedContents);
 
             // Store new embeddings in cache
             const embeddingsToCache = new Map<string, number[]>();

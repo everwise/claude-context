@@ -55,8 +55,47 @@ export class AstCodeSplitter implements Splitter {
         try {
             console.log(`🌳 Using AST splitter for ${language} file: ${filePath || 'unknown'}`);
 
-            this.parser.setLanguage(langConfig.parser);
-            const tree = this.parser.parse(code);
+            // Validate input before parsing
+            if (typeof code !== 'string') {
+                console.warn(`[ASTSplitter] ⚠️  Code is not a string (type: ${typeof code}), falling back to LangChain: ${filePath || 'unknown'}`);
+                return await this.langchainFallback.split(String(code || ''), language, filePath);
+            }
+
+            if (code.length === 0) {
+                console.log(`[ASTSplitter] Empty file, returning empty chunks: ${filePath || 'unknown'}`);
+                return [];
+            }
+
+            // Set language with explicit error handling
+            try {
+                this.parser.setLanguage(langConfig.parser);
+            } catch (langError) {
+                console.error(`[ASTSplitter] ❌ setLanguage failed for ${language}: ${langError}`);
+                throw langError;
+            }
+
+            // Parse with explicit error handling
+            // Note: tree-sitter has a 32KB (32767 bytes) limit for string inputs
+            // For larger files, we must use the callback-based API with chunked reads
+            let tree;
+            try {
+                if (code.length > 32767) {
+                    // Use callback-based parsing for files > 32KB
+                    // Return chunks of at most 16KB to stay well under the 32KB limit
+                    const CHUNK_SIZE = 16384;
+                    tree = this.parser.parse((offset) => {
+                        if (offset >= code.length) return null;
+                        const end = Math.min(offset + CHUNK_SIZE, code.length);
+                        return code.slice(offset, end);
+                    });
+                } else {
+                    // Use direct string parsing for smaller files
+                    tree = this.parser.parse(code);
+                }
+            } catch (parseError) {
+                console.error(`[ASTSplitter] ❌ parse failed for ${language} (${filePath}): ${parseError}`);
+                throw parseError;
+            }
 
             if (!tree.rootNode) {
                 console.warn(`[ASTSplitter] ⚠️  Failed to parse AST for ${language}, falling back to LangChain: ${filePath || 'unknown'}`);
