@@ -29,9 +29,6 @@ importers:
       https-browserify:
         specifier: ^1.0.0
         version: 1.0.0
-      ollama:
-        specifier: ^0.5.17
-        version: 0.5.17
       os-browserify:
         specifier: ^0.3.0
         version: 0.3.0
