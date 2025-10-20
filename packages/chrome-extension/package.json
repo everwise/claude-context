@@ -1,6 +1,6 @@
 {
   "name": "@everwise/claude-context-chrome-extension",
-  "version": "0.1.33",
+  "version": "0.1.34",
   "description": "Claude Context Chrome extension for web-based code indexing",
   "private": true,
   "scripts": {
