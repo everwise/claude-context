@@ -1585,6 +1585,7 @@ export class Context {
             '.scala': 'scala',
             '.m': 'objective-c',
             '.mm': 'objective-c',
+            '.json': 'json',
             '.ipynb': 'jupyter'
         };
         return languageMap[ext] || 'text';

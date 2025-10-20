@@ -84,6 +84,7 @@ export class LangChainCodeSplitter implements Splitter {
             'tex': 'latex',
             'solidity': 'sol',
             'sol': 'sol',
+            'json': 'js', // JSON uses JavaScript splitter for structure
         };
 
         return languageMap[language.toLowerCase()] || null;
