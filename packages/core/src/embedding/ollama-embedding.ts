@@ -16,6 +16,7 @@ export class OllamaEmbedding extends Embedding {
     private config: OllamaEmbeddingConfig;
     private dimension: number = 768; // Default dimension for many embedding models
     private dimensionDetected: boolean = false; // Track if dimension has been detected
+    private dimensionDetectionPromise: Promise<number> | null = null; // Track in-progress detection
     protected maxTokens: number = 2048; // Default context window for Ollama
 
     constructor(config: OllamaEmbeddingConfig) {
@@ -248,33 +249,79 @@ export class OllamaEmbedding extends Embedding {
     }
 
     async detectDimension(testText: string = "test"): Promise<number> {
-        console.log(`[OllamaEmbedding] Detecting embedding dimension...`);
+        // If dimension already detected, return cached value
+        if (this.dimensionDetected) {
+            console.log(`[OllamaEmbedding] Using cached dimension: ${this.dimension}`);
+            return this.dimension;
+        }
+
+        // If detection is already in progress, wait for it
+        if (this.dimensionDetectionPromise) {
+            console.log(`[OllamaEmbedding] Dimension detection already in progress, waiting...`);
+            return this.dimensionDetectionPromise;
+        }
+
+        // Start new detection
+        console.log(`[OllamaEmbedding] Starting dimension detection...`);
+        this.dimensionDetectionPromise = this.performDimensionDetection(testText);
 
         try {
-            const processedText = this.preprocessText(testText);
-            const embedOptions: any = {
-                model: this.config.model,
-                input: processedText,
-                options: this.config.options,
-            };
-
-            if (this.config.keepAlive && this.config.keepAlive !== '') {
-                embedOptions.keep_alive = this.config.keepAlive;
-            }
-
-            const response = await this.client.embed(embedOptions);
-
-            if (!response.embeddings || !response.embeddings[0]) {
-                throw new Error('Ollama API returned invalid response');
-            }
-
-            const dimension = response.embeddings[0].length;
-            console.log(`[OllamaEmbedding] Successfully detected embedding dimension: ${dimension}`);
-            return dimension;
-        } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-            console.error(`[OllamaEmbedding] Failed to detect dimension: ${errorMessage}`);
-            throw new Error(`Failed to detect Ollama embedding dimension: ${errorMessage}`);
+            this.dimension = await this.dimensionDetectionPromise;
+            this.dimensionDetected = true;
+            console.log(`[OllamaEmbedding] ✅ Dimension detection complete: ${this.dimension}`);
+            return this.dimension;
+        } finally {
+            // Clear the promise so future calls can detect again if needed
+            this.dimensionDetectionPromise = null;
         }
+    }
+
+    private async performDimensionDetection(testText: string): Promise<number> {
+        const processedText = this.preprocessText(testText);
+        const embedOptions: any = {
+            model: this.config.model,
+            input: processedText,
+            options: this.config.options,
+        };
+
+        if (this.config.keepAlive && this.config.keepAlive !== '') {
+            embedOptions.keep_alive = this.config.keepAlive;
+        }
+
+        // Retry with exponential backoff (following embed/embedBatch pattern)
+        const maxRetries = 3;
+        const initialInterval = 1000; // 1 second
+        const backoffMultiplier = 2;
+        let attempt = 1;
+        let interval = initialInterval;
+
+        while (attempt <= maxRetries) {
+            try {
+                const response = await this.client.embed(embedOptions);
+
+                if (!response.embeddings || !response.embeddings[0]) {
+                    throw new Error('Ollama API returned invalid response');
+                }
+
+                const dimension = response.embeddings[0].length;
+                console.log(`[OllamaEmbedding] Successfully detected embedding dimension: ${dimension}`);
+                return dimension;
+            } catch (error) {
+                const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+                console.error(`[OllamaEmbedding] ❌ Dimension detection failed on attempt ${attempt}/${maxRetries}: ${errorMessage}`);
+
+                if (attempt === maxRetries) {
+                    throw new Error(`Failed to detect Ollama embedding dimension after ${maxRetries} attempts: ${errorMessage}`);
+                }
+
+                console.log(`[OllamaEmbedding] ⏳ Retrying dimension detection in ${interval}ms...`);
+                await new Promise(resolve => setTimeout(resolve, interval));
+                interval *= backoffMultiplier;
+                attempt++;
+            }
+        }
+
+        // TypeScript requires a return statement here, though it's unreachable
+        throw new Error('Unreachable code');
     }
 }
