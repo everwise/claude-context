@@ -18,6 +18,8 @@ export class OllamaEmbedding extends Embedding {
     private dimensionDetected: boolean = false; // Track if dimension has been detected
     private dimensionDetectionPromise: Promise<number> | null = null; // Track in-progress detection
     protected maxTokens: number = 2048; // Default context window for Ollama
+    private maxTokensDetected: boolean = false; // Track if maxTokens has been detected
+    private maxTokensDetectionPromise: Promise<number> | null = null; // Track in-progress detection
 
     constructor(config: OllamaEmbeddingConfig) {
         super();
@@ -33,31 +35,25 @@ export class OllamaEmbedding extends Embedding {
             this.dimensionDetected = true;
         }
 
-        // Set max tokens based on config or use default
+        // Set max tokens based on config or will be detected on first use
         if (config.maxTokens) {
             this.maxTokens = config.maxTokens;
-        } else {
-            // Set default based on known models
-            this.setDefaultMaxTokensForModel(config.model);
+            this.maxTokensDetected = true;
         }
 
-        // If no dimension is provided, it will be detected in the first embed call
-    }
-
-    private setDefaultMaxTokensForModel(model: string): void {
-        // Set different max tokens based on known models
-        if (model?.includes('nomic-embed-text')) {
-            this.maxTokens = 8192; // nomic-embed-text supports 8192 tokens
-        } else if (model?.includes('snowflake-arctic-embed')) {
-            this.maxTokens = 8192; // snowflake-arctic-embed supports 8192 tokens
-        } else {
-            this.maxTokens = 2048; // Default for most Ollama models
-        }
+        // Both dimension and maxTokens will be detected in the first embed call if not configured
     }
 
     async embed(text: string): Promise<EmbeddingVector> {
         // Preprocess the text
         const processedText = this.preprocessText(text);
+
+        // Detect maxTokens on first use if not configured
+        if (!this.maxTokensDetected && !this.config.maxTokens) {
+            this.maxTokens = await this.detectMaxTokens();
+            this.maxTokensDetected = true;
+            console.log(`[OllamaEmbedding] 📐 Detected Ollama max tokens: ${this.maxTokens} for model: ${this.config.model}`);
+        }
 
         // Detect dimension on first use if not configured
         if (!this.dimensionDetected && !this.config.dimension) {
@@ -69,7 +65,10 @@ export class OllamaEmbedding extends Embedding {
         const embedOptions: any = {
             model: this.config.model,
             input: processedText,
-            options: this.config.options,
+            options: {
+                ...this.config.options,
+                num_ctx: this.maxTokens  // Override model's default num_ctx to match training context
+            },
         };
 
         // Only include keep_alive if it has a valid value
@@ -119,6 +118,13 @@ export class OllamaEmbedding extends Embedding {
         // Preprocess all texts
         const processedTexts = this.preprocessTexts(texts);
 
+        // Detect maxTokens on first use if not configured
+        if (!this.maxTokensDetected && !this.config.maxTokens) {
+            this.maxTokens = await this.detectMaxTokens();
+            this.maxTokensDetected = true;
+            console.log(`[OllamaEmbedding] 📐 Detected Ollama max tokens: ${this.maxTokens} for model: ${this.config.model}`);
+        }
+
         // Detect dimension on first use if not configured
         if (!this.dimensionDetected && !this.config.dimension) {
             this.dimension = await this.detectDimension();
@@ -130,7 +136,10 @@ export class OllamaEmbedding extends Embedding {
         const embedOptions: any = {
             model: this.config.model,
             input: processedTexts, // Pass array directly to Ollama
-            options: this.config.options,
+            options: {
+                ...this.config.options,
+                num_ctx: this.maxTokens  // Override model's default num_ctx to match training context
+            },
         };
 
         // Only include keep_alive if it has a valid value
@@ -186,15 +195,23 @@ export class OllamaEmbedding extends Embedding {
     }
 
     /**
-     * Set model type and detect its dimension
+     * Set model type and detect its dimension and maxTokens
      * @param model Model name
      */
     async setModel(model: string): Promise<void> {
         this.config.model = model;
-        // Reset dimension detection when model changes
+        // Reset both dimension and maxTokens detection when model changes
         this.dimensionDetected = false;
-        // Update max tokens for new model
-        this.setDefaultMaxTokensForModel(model);
+        this.maxTokensDetected = false;
+
+        // Detect maxTokens for new model
+        if (!this.config.maxTokens) {
+            this.maxTokens = await this.detectMaxTokens();
+            this.maxTokensDetected = true;
+            console.log(`[OllamaEmbedding] 📐 Detected Ollama max tokens: ${this.maxTokens} for model: ${this.config.model}`);
+        }
+
+        // Detect dimension for new model
         if (!this.config.dimension) {
             this.dimension = await this.detectDimension();
             this.dimensionDetected = true;
@@ -248,6 +265,59 @@ export class OllamaEmbedding extends Embedding {
         return this.client;
     }
 
+    async detectMaxTokens(): Promise<number> {
+        // If maxTokens already detected, return cached value
+        if (this.maxTokensDetected) {
+            console.log(`[OllamaEmbedding] Using cached maxTokens: ${this.maxTokens}`);
+            return this.maxTokens;
+        }
+
+        // If detection is already in progress, wait for it
+        if (this.maxTokensDetectionPromise) {
+            console.log(`[OllamaEmbedding] MaxTokens detection already in progress, waiting...`);
+            return this.maxTokensDetectionPromise;
+        }
+
+        // Start new detection
+        console.log(`[OllamaEmbedding] Starting maxTokens detection...`);
+        this.maxTokensDetectionPromise = this.performMaxTokensDetection();
+
+        try {
+            this.maxTokens = await this.maxTokensDetectionPromise;
+            this.maxTokensDetected = true;
+            console.log(`[OllamaEmbedding] ✅ MaxTokens detection complete: ${this.maxTokens}`);
+            return this.maxTokens;
+        } finally {
+            // Clear the promise so future calls can detect again if needed
+            this.maxTokensDetectionPromise = null;
+        }
+    }
+
+    private async performMaxTokensDetection(): Promise<number> {
+        try {
+            const modelInfo = await this.client.show({ model: this.config.model });
+
+            // Extract num_ctx from modelfile if present
+            if (modelInfo.modelfile) {
+                const numCtxMatch = modelInfo.modelfile.match(/PARAMETER num_ctx (\d+)/);
+                if (numCtxMatch) {
+                    const numCtx = parseInt(numCtxMatch[1], 10);
+                    console.log(`[OllamaEmbedding] Successfully detected num_ctx from modelfile: ${numCtx}`);
+                    return numCtx;
+                }
+            }
+
+            // Fallback to default if not found
+            console.log(`[OllamaEmbedding] num_ctx not found in modelfile, using default: 2048`);
+            return 2048;
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+            console.error(`[OllamaEmbedding] ❌ Failed to detect maxTokens: ${errorMessage}`);
+            console.log(`[OllamaEmbedding] Using fallback maxTokens: 2048`);
+            return 2048; // Safe fallback
+        }
+    }
+
     async detectDimension(testText: string = "test"): Promise<number> {
         // If dimension already detected, return cached value
         if (this.dimensionDetected) {
@@ -281,7 +351,10 @@ export class OllamaEmbedding extends Embedding {
         const embedOptions: any = {
             model: this.config.model,
             input: processedText,
-            options: this.config.options,
+            options: {
+                ...this.config.options,
+                num_ctx: this.maxTokens  // Override model's default num_ctx to match training context
+            },
         };
 
         if (this.config.keepAlive && this.config.keepAlive !== '') {
