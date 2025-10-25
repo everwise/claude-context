@@ -21,6 +21,12 @@ export class OllamaEmbedding extends Embedding {
     private maxTokensDetected: boolean = false; // Track if maxTokens has been detected
     private maxTokensDetectionPromise: Promise<number> | null = null; // Track in-progress detection
 
+    // Known model overrides for problematic models where Modelfile config is incorrect
+    // Supports wildcards: 'model-name*' matches 'model-name:latest', 'model-name:v1', etc.
+    private static readonly MODEL_MAX_TOKENS_OVERRIDES: Record<string, number> = {
+        'nomic-embed-text*': 2048, // Modelfile claims 8192 but only trained on 2048, causes crashes
+    }
+
     constructor(config: OllamaEmbeddingConfig) {
         super();
         this.config = config;
@@ -293,7 +299,36 @@ export class OllamaEmbedding extends Embedding {
         }
     }
 
+    /**
+     * Check if a model matches any override patterns (supports wildcards)
+     */
+    private static getModelOverride(modelName: string): number | undefined {
+        // Check exact match first
+        if (OllamaEmbedding.MODEL_MAX_TOKENS_OVERRIDES[modelName] !== undefined) {
+            return OllamaEmbedding.MODEL_MAX_TOKENS_OVERRIDES[modelName];
+        }
+
+        // Check wildcard patterns
+        for (const [pattern, value] of Object.entries(OllamaEmbedding.MODEL_MAX_TOKENS_OVERRIDES)) {
+            if (pattern.endsWith('*')) {
+                const prefix = pattern.slice(0, -1);
+                if (modelName.startsWith(prefix)) {
+                    return value;
+                }
+            }
+        }
+
+        return undefined;
+    }
+
     private async performMaxTokensDetection(): Promise<number> {
+        // Check for known model overrides first
+        const override = OllamaEmbedding.getModelOverride(this.config.model);
+        if (override !== undefined) {
+            console.log(`[OllamaEmbedding] Using known override for ${this.config.model}: ${override} tokens`);
+            return override;
+        }
+
         try {
             const modelInfo = await this.client.show({ model: this.config.model });
 
