@@ -1,6 +1,6 @@
 {
   "name": "claude-context",
-  "version": "0.1.36",
+  "version": "0.1.37",
   "description": "A powerful code indexing tool with multi-platform support",
   "private": true,
   "scripts": {
