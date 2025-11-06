@@ -427,7 +427,15 @@ export class ToolHandlers {
             const lastProgress = this.snapshotManager.getIndexingProgress(absolutePath);
 
             // Set codebase to failed status with error information
-            const errorMessage = error.message || String(error);
+            let errorMessage = error.message || String(error);
+
+            // CRITICAL: Detect vector database connection errors and provide clear guidance
+            if (errorMessage.includes('server is unavailable') ||
+                errorMessage.includes('UNAVAILABLE') ||
+                errorMessage.includes('No connection established')) {
+                errorMessage = `Unable to connect to vector database. Please ensure the vector database is running before indexing. Original error: ${errorMessage}`;
+            }
+
             this.snapshotManager.setCodebaseIndexFailed(absolutePath, errorMessage, lastProgress);
             this.snapshotManager.saveCodebaseSnapshot();
 
@@ -618,6 +626,19 @@ export class ToolHandlers {
                         type: "text",
                         text: COLLECTION_LIMIT_MESSAGE
                     }]
+                };
+            }
+
+            // CRITICAL: Check if this is a vector database connection error
+            if (errorMessage.includes('server is unavailable') ||
+                errorMessage.includes('UNAVAILABLE') ||
+                errorMessage.includes('No connection established')) {
+                return {
+                    content: [{
+                        type: "text",
+                        text: `❌ Unable to connect to vector database server. Please ensure the vector database is running and accessible before searching.\n\nError: ${errorMessage}`
+                    }],
+                    isError: true
                 };
             }
 

@@ -448,8 +448,17 @@ export class Context {
             collectionHasData = stats && stats.length > 0;
             console.log(`[Context] 🔍 Collection validation: ${collectionHasData ? 'has data' : 'EMPTY'}`);
         } catch (error) {
+            // CRITICAL: Distinguish between connection errors and empty collections
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            const isConnectionError = this.isMilvusConnectionError(errorMessage);
+
+            if (isConnectionError) {
+                console.error(`[Context] ❌ Cannot connect to vector database:`, error);
+                throw new Error(`Vector database server is unavailable. Please ensure it is running and accessible. Error: ${errorMessage}`);
+            }
+
+            // If not a connection error, treat as empty collection
             console.warn(`[Context] ⚠️ Failed to query collection for validation:`, error);
-            // Assume collection doesn't have data if query fails
             collectionHasData = false;
         }
 
@@ -727,6 +736,12 @@ export class Context {
                 const stats = await this.vectorDatabase.query(collectionName, '', ['id'], 1);
                 console.log(`[Context] 🔍 Collection '${collectionName}' exists and appears to have data`);
             } catch (error) {
+                // Check if this is a connection error
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                if (this.isMilvusConnectionError(errorMessage)) {
+                    console.error(`[Context] ❌ Cannot connect to vector database:`, error);
+                    throw new Error(`Vector database server is unavailable. Please ensure it is running and accessible. Error: ${errorMessage}`);
+                }
                 console.log(`[Context] ⚠️  Collection '${collectionName}' exists but may be empty or not properly indexed:`, error);
             }
 
@@ -1349,6 +1364,25 @@ export class Context {
             errorMessage.includes('socket hang up') ||
             (errorMessage.includes('connection') && errorMessage.includes('reset')) ||
             errorMessage.includes('fetch failed')
+        );
+    }
+
+    /**
+     * Detect if error is a Milvus connection/unavailability error
+     * @param errorMessage Error message string
+     * @returns True if error indicates Milvus server is unavailable
+     */
+    private isMilvusConnectionError(errorMessage: string): boolean {
+        const lowerMessage = errorMessage.toLowerCase();
+        return (
+            lowerMessage.includes('unavailable') ||
+            lowerMessage.includes('no connection established') ||
+            lowerMessage.includes('econnrefused') ||
+            lowerMessage.includes('connection refused') ||
+            lowerMessage.includes('failed to connect') ||
+            lowerMessage.includes('network error') ||
+            lowerMessage.includes('timeout') ||
+            (lowerMessage.includes('14') && lowerMessage.includes('unavailable')) // gRPC error code 14
         );
     }
 
